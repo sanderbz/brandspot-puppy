@@ -1,0 +1,24 @@
+{
+  "name": "brandspot-puppy",
+  "version": "1.0.0",
+  "description": "Minimal Node.js backend for web crawling and article extraction",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "puppeteer": "^23",
+    "@mozilla/readability": "^0.5",
+    "jsdom": "^24",
+    "markdownify": "^1",
+    "fastify": "^4",
+    "node-fetch": "^4",
+    "@ghostery/adblocker-puppeteer": "^2.11.1",
+    "@duckduckgo/autoconsent": "^14.5.1"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+} 
