@@ -149,7 +149,6 @@ fastify.get('/health', async (request, reply) => {
 // Background crawling function
 const processCrawlRequest = async (url, callback_url, test) => {
   let page;
-  let blocker;
 
   try {
     const stats = getBrowserStats();
@@ -164,7 +163,7 @@ const processCrawlRequest = async (url, callback_url, test) => {
 
     // Set up Ghostery adblocker
     console.log(`[${new Date().toISOString()}] Setting up Ghostery adblocker...`);
-    blocker = await PuppeteerBlocker.fromPrebuiltAdsAndTracking(fetch);
+    const blocker = await PuppeteerBlocker.fromPrebuiltAdsAndTracking(fetch);
     await blocker.enableBlockingInPage(page);
     console.log(`[${new Date().toISOString()}] Adblocker enabled`);
 
@@ -247,10 +246,6 @@ const processCrawlRequest = async (url, callback_url, test) => {
     // Clean up page resources (keep browser alive)
     console.log(`[${new Date().toISOString()}] Starting page cleanup...`);
     try {
-      if (blocker && page) {
-        console.log(`[${new Date().toISOString()}] Disabling adblocker...`);
-        await blocker.disableBlockingInPage(page);
-      }
       if (page) {
         console.log(`[${new Date().toISOString()}] Closing page...`);
         await page.close();
