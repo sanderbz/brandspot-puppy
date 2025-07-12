@@ -22,22 +22,25 @@ const gracefulShutdown = async (signal) => {
   }
   
   isShuttingDown = true;
-  console.log(`[${new Date().toISOString()}] Received ${signal}, starting graceful shutdown...`);
+  console.log(`[${new Date().toISOString()}] Received ${signal}, starting quick shutdown...`);
+  
+  // Force exit after 1 second no matter what
+  const forceExit = setTimeout(() => {
+    console.log(`[${new Date().toISOString()}] Force exit after 1 second`);
+    process.exit(0);
+  }, 1000);
   
   try {
-    // Close Fastify server first
-    console.log(`[${new Date().toISOString()}] Closing HTTP server...`);
-    await fastify.close();
-    console.log(`[${new Date().toISOString()}] HTTP server closed`);
-    
-    // Close browser
+    // Close browser quickly (most important cleanup)
+    console.log(`[${new Date().toISOString()}] Closing browser...`);
     await shutdownBrowser();
-    
-    console.log(`[${new Date().toISOString()}] Graceful shutdown completed`);
+    console.log(`[${new Date().toISOString()}] Browser closed`);
   } catch (error) {
-    console.error(`[${new Date().toISOString()}] Error during shutdown:`, error);
+    console.log(`[${new Date().toISOString()}] Error closing browser: ${error.message}`);
   }
   
+  console.log(`[${new Date().toISOString()}] Quick shutdown complete`);
+  clearTimeout(forceExit);
   process.exit(0);
 };
 
@@ -143,25 +146,14 @@ fastify.get('/health', async (request, reply) => {
   };
 });
 
-// POST /crawl endpoint
-fastify.post('/crawl', async (request, reply) => {
-  const { url, callback_url, test = false } = request.body;
-
-  // Input validation
-  if (!url || typeof url !== 'string') {
-    return reply.status(400).send({ error: 'url is required and must be a string' });
-  }
-
-  if (!test && (!callback_url || typeof callback_url !== 'string')) {
-    return reply.status(400).send({ error: 'callback_url is required when test is false' });
-  }
-
+// Background crawling function
+const processCrawlRequest = async (url, callback_url, test) => {
   let page;
   let blocker;
 
   try {
     const stats = getBrowserStats();
-    console.log(`[${new Date().toISOString()}] Starting crawl for: ${url} (request #${stats.requestCount})`);
+    console.log(`[${new Date().toISOString()}] Starting background crawl for: ${url} (request #${stats.requestCount})`);
     
     // Get persistent browser instance
     console.log(`[${new Date().toISOString()}] Getting browser instance...`);
@@ -203,10 +195,9 @@ fastify.post('/crawl', async (request, reply) => {
 
     if (!article) {
       logError(new Error('Failed to extract article content'), 'Readability');
-      return reply.status(502).send({ error: 'Failed to extract article content' });
+      return;
     }
     console.log(`[${new Date().toISOString()}] Article extracted: "${article.title}"`);
-
 
     // Convert HTML content to Markdown using bullet-proof strategy
     console.log(`[${new Date().toISOString()}] Converting to markdown...`);
@@ -228,8 +219,6 @@ fastify.post('/crawl', async (request, reply) => {
     if (test) {
       console.log(`[${new Date().toISOString()}] Test mode - Article extracted:`);
       console.log(JSON.stringify(result, null, 2));
-      console.log(`[${new Date().toISOString()}] Sending test mode response...`);
-      return reply.status(202).send({ message: 'Request accepted and processed' });
     } else {
       console.log(`[${new Date().toISOString()}] Production mode - posting to callback...`);
       // POST to callback URL
@@ -244,23 +233,16 @@ fastify.post('/crawl', async (request, reply) => {
 
         if (!response.ok) {
           logError(new Error(`Callback request failed with status ${response.status}`), 'Callback');
+        } else {
+          console.log(`[${new Date().toISOString()}] Successfully posted to callback`);
         }
-
-        return reply.status(202).send({ message: 'Request accepted and processed' });
       } catch (callbackError) {
         logError(callbackError, 'Callback');
-        return reply.status(202).send({ message: 'Request accepted but callback failed' });
       }
     }
 
   } catch (error) {
-    logError(error, 'Crawling');
-    
-    if (error.message.includes('net::ERR_') || error.message.includes('Navigation')) {
-      return reply.status(502).send({ error: 'Failed to navigate to URL' });
-    }
-    
-    return reply.status(500).send({ error: 'Internal server error' });
+    logError(error, 'Background crawling');
   } finally {
     // Clean up page resources (keep browser alive)
     console.log(`[${new Date().toISOString()}] Starting page cleanup...`);
@@ -278,6 +260,31 @@ fastify.post('/crawl', async (request, reply) => {
       logError(cleanupError, 'Page cleanup');
     }
   }
+};
+
+// POST /crawl endpoint
+fastify.post('/crawl', async (request, reply) => {
+  const { url, callback_url, test = false } = request.body;
+
+  // Input validation
+  if (!url || typeof url !== 'string') {
+    return reply.status(400).send({ error: 'url is required and must be a string' });
+  }
+
+  if (!test && (!callback_url || typeof callback_url !== 'string')) {
+    return reply.status(400).send({ error: 'callback_url is required when test is false' });
+  }
+
+  console.log(`[${new Date().toISOString()}] Crawl request received for: ${url} (test: ${test})`);
+
+  // Start background processing (fire-and-forget)
+  processCrawlRequest(url, callback_url, test).catch(error => {
+    logError(error, 'Background processing');
+  });
+
+  // Immediately respond to client
+  console.log(`[${new Date().toISOString()}] Responding immediately to client`);
+  return reply.status(202).send({ message: 'Request accepted and processed' });
 });
 
 // Start server
