@@ -8,6 +8,7 @@ import { PuppeteerBlocker } from '@ghostery/adblocker-puppeteer';
 import { getAutoConsentScript } from './autoconsent.js';
 import { getBrowser, createPage, shutdownBrowser, getBrowserStats } from './browser.js';
 import { config } from './config.js';
+import { injectHeader } from './header-splice.js';
 
 const fastify = Fastify({
   logger: true
@@ -186,7 +187,12 @@ const processCrawlRequest = async (url, callback_url, test) => {
     const document = dom.window.document;
     console.log(`[${new Date().toISOString()}] DOM created`);
 
-    // Extract article content with Readability
+    // Inject header into DOM before Readability processing
+    console.log(`[${new Date().toISOString()}] Injecting header into DOM...`);
+    const headerResult = injectHeader(document);
+    console.log(`[${new Date().toISOString()}] Header injection completed - found: ${headerResult.headerFound ? `yes (${headerResult.headerTag})` : 'no'}`);
+
+    // Extract article content with Readability (now includes header)
     console.log(`[${new Date().toISOString()}] Extracting article with Readability...`);
     const reader = new Readability(document);
     const article = reader.parse();
