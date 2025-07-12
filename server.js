@@ -6,16 +6,44 @@ import TurndownService from 'turndown';
 import fetch from 'node-fetch';
 import { PuppeteerBlocker } from '@ghostery/adblocker-puppeteer';
 import { getAutoConsentScript } from './autoconsent.js';
-import { getBrowser, createPage, gracefulShutdown, getBrowserStats } from './browser.js';
+import { getBrowser, createPage, shutdownBrowser, getBrowserStats } from './browser.js';
 import { config } from './config.js';
 
 const fastify = Fastify({
   logger: true
 });
 
+// Graceful shutdown handler
+let isShuttingDown = false;
+const gracefulShutdown = async (signal) => {
+  if (isShuttingDown) {
+    console.log(`[${new Date().toISOString()}] Already shutting down, ignoring ${signal}`);
+    return;
+  }
+  
+  isShuttingDown = true;
+  console.log(`[${new Date().toISOString()}] Received ${signal}, starting graceful shutdown...`);
+  
+  try {
+    // Close Fastify server first
+    console.log(`[${new Date().toISOString()}] Closing HTTP server...`);
+    await fastify.close();
+    console.log(`[${new Date().toISOString()}] HTTP server closed`);
+    
+    // Close browser
+    await shutdownBrowser();
+    
+    console.log(`[${new Date().toISOString()}] Graceful shutdown completed`);
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] Error during shutdown:`, error);
+  }
+  
+  process.exit(0);
+};
+
 // Handle shutdown signals
-process.on('SIGTERM', gracefulShutdown);
-process.on('SIGINT', gracefulShutdown);
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 // Helper function to log errors with timestamp
 const logError = (error, context = '') => {

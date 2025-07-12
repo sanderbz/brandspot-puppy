@@ -89,8 +89,8 @@ export const createPage = async (browser) => {
   return page;
 };
 
-// Graceful shutdown
-export const gracefulShutdown = async () => {
+// Graceful shutdown (browser only)
+export const shutdownBrowser = async () => {
   log('Shutting down browser gracefully...');
   if (globalBrowser) {
     try {
@@ -113,5 +113,9 @@ const initializeOnStartup = async () => {
   }
 };
 
-// Auto-initialize browser when module is imported
-initializeOnStartup(); 
+// Auto-initialize browser when module is imported (only in non-test environments)
+if (process.env.NODE_ENV !== 'test') {
+  initializeOnStartup().catch(() => {
+    // Silent catch - errors will be handled when getBrowser() is called
+  });
+} 
