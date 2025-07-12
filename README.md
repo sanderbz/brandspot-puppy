@@ -163,7 +163,6 @@ curl -X POST http://localhost:3000/crawl \
 - **puppeteer-extra-plugin-stealth**: Stealth plugin to avoid detection (v2.11.2)
 - **esbuild**: Runtime bundling of consent scripts (v0.25.6)
 
-
 ## Technical Details
 
 ### Architecture
