@@ -1,11 +1,15 @@
 import Fastify from 'fastify';
-import puppeteer from 'puppeteer';
+import puppeteer from 'puppeteer-extra';
+import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import { Readability } from '@mozilla/readability';
 import { JSDOM } from 'jsdom';
 import markdownify from 'markdownify';
 import fetch from 'node-fetch';
 import { PuppeteerBlocker } from '@ghostery/adblocker-puppeteer';
-import { AutoConsent } from '@duckduckgo/autoconsent';
+import { getAutoConsentScript } from './autoconsent.js';
+
+// Use stealth plugin to avoid detection
+puppeteer.use(StealthPlugin());
 
 const fastify = Fastify({
   logger: true
@@ -17,6 +21,20 @@ const logError = (error, context = '') => {
   console.error(`[${timestamp}] ERROR ${context}:`, error.message);
   if (error.stack) {
     console.error(error.stack);
+  }
+};
+
+// Helper function to inject autoconsent script before any site JavaScript runs
+const injectAutoConsentScript = async (page) => {
+  try {
+    const autoConsentScript = await getAutoConsentScript();
+    
+    // Inject the script before any site JavaScript runs
+    await page.evaluateOnNewDocument(autoConsentScript);
+    
+    console.log(`[${new Date().toISOString()}] AutoConsent script injected successfully`);
+  } catch (error) {
+    console.log(`[${new Date().toISOString()}] AutoConsent injection failed: ${error.message}`);
   }
 };
 
@@ -50,20 +68,11 @@ fastify.post('/crawl', async (request, reply) => {
     blocker = await PuppeteerBlocker.fromPrebuiltAdsAndTracking(fetch);
     await blocker.enableBlockingInPage(page);
 
-    // Set up DuckDuckGo AutoConsent
-    const autoConsent = new AutoConsent(page);
-    await autoConsent.init();
+    // Inject autoconsent script before any site JavaScript runs
+    await injectAutoConsentScript(page);
 
     // Navigate to URL
     await page.goto(url, { waitUntil: 'networkidle0' });
-
-    // Handle cookie consent popups
-    try {
-      await autoConsent.optOut();
-    } catch (consentError) {
-      // Non-critical: log but continue if consent handling fails
-      console.log(`[${new Date().toISOString()}] Consent handling info: ${consentError.message}`);
-    }
 
     // Get fully rendered HTML
     const html = await page.content();

@@ -19,8 +19,8 @@ A minimal, production-ready Node.js backend application that provides web crawli
 - **Better Performance**: Faster page loads by blocking unnecessary content
 
 ### 🍪 Cookie Consent Management
-- **DuckDuckGo AutoConsent**: Automatically handles cookie consent popups
-- **Automatic Opt-out**: Attempts to reject non-essential cookies when possible
+- **DuckDuckGo AutoConsent**: Automatically handles 680+ different cookie popup types
+- **Smart Opt-Out**: Automatically rejects non-essential cookies from major CMPs
 - **Clean Extraction**: Removes consent barriers for better content access
 
 ## Installation
@@ -37,6 +37,7 @@ pnpm install
 
 After installation, the app will automatically:
 - Block ads and trackers using Ghostery's advanced filtering
+- Avoid detection using Puppeteer Extra's stealth capabilities
 - Handle cookie consent popups using DuckDuckGo's AutoConsent
 - Provide cleaner, faster crawling with enhanced privacy protection
 
@@ -154,9 +155,11 @@ curl -X POST http://localhost:3000/crawl \
 
 ### Privacy Dependencies
 - **@ghostery/adblocker-puppeteer**: Ad and tracker blocking (v2.11.1)
-- **@duckduckgo/autoconsent**: Cookie consent management (v14.5.1)
+- **@duckduckgo/autoconsent**: Automatic cookie banner removal (v14.5.1)
+- **puppeteer-extra**: Enhanced Puppeteer with plugin support (v3.3.6)
+- **puppeteer-extra-plugin-stealth**: Stealth plugin to avoid detection (v2.11.2)
 
-> **Note**: The originally requested `@inqludeit/cmp-b-gone` package does not exist. We've implemented DuckDuckGo's AutoConsent as an alternative for handling cookie consent popups.
+> **Note**: The originally requested `@inqludeit/cmp-b-gone` package does not exist. We've implemented the best privacy solution using DuckDuckGo's AutoConsent for cookie banner removal, Puppeteer Extra with Stealth plugin for detection avoidance, and Ghostery's adblocker for comprehensive privacy protection.
 
 ## Technical Details
 
