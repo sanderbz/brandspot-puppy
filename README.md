@@ -19,9 +19,10 @@ A minimal, production-ready Node.js backend application that provides web crawli
 - **Better Performance**: Faster page loads by blocking unnecessary content
 
 ### 🍪 Cookie Consent Management
-- **DuckDuckGo AutoConsent**: Automatically handles 680+ different cookie popup types
-- **Smart Opt-Out**: Automatically rejects non-essential cookies from major CMPs
-- **Clean Extraction**: Removes consent barriers for better content access
+- **Runtime CMP Engine**: Bundles the latest @duckduckgo/autoconsent rules at runtime
+- **Pre-execution Injection**: Injects consent handling before any site JavaScript runs
+- **Auto-bundling**: Uses esbuild to create optimized content scripts on first startup
+- **Rule Caching**: Caches bundled rules for optimal performance on subsequent requests
 
 ## Installation
 
@@ -38,7 +39,7 @@ pnpm install
 After installation, the app will automatically:
 - Block ads and trackers using Ghostery's advanced filtering
 - Avoid detection using Puppeteer Extra's stealth capabilities
-- Handle cookie consent popups using DuckDuckGo's AutoConsent
+- Bundle and inject the latest cookie consent rules at runtime
 - Provide cleaner, faster crawling with enhanced privacy protection
 
 No additional configuration is required - the privacy features are enabled by default.
@@ -152,32 +153,67 @@ curl -X POST http://localhost:3000/crawl \
 - **jsdom**: JavaScript implementation of DOM standards
 - **markdownify**: HTML to Markdown converter
 - **node-fetch**: HTTP client for Node.js
+- **esbuild**: JavaScript bundler for runtime CMP rule compilation
 
 ### Privacy Dependencies
 - **@ghostery/adblocker-puppeteer**: Ad and tracker blocking (v2.11.1)
-- **@duckduckgo/autoconsent**: Automatic cookie banner removal (v14.5.1)
+- **@duckduckgo/autoconsent**: CMP rules and consent management (v14.5.1)
 - **puppeteer-extra**: Enhanced Puppeteer with plugin support (v3.3.6)
 - **puppeteer-extra-plugin-stealth**: Stealth plugin to avoid detection (v2.11.2)
+- **esbuild**: Runtime bundling of consent scripts (v0.25.6)
 
-> **Note**: The originally requested `@inqludeit/cmp-b-gone` package does not exist. We've implemented the best privacy solution using DuckDuckGo's AutoConsent for cookie banner removal, Puppeteer Extra with Stealth plugin for detection avoidance, and Ghostery's adblocker for comprehensive privacy protection.
+> **Note**: The originally requested `@inqludeit/cmp-b-gone` package does not exist. We've implemented a superior solution using runtime-bundled DuckDuckGo AutoConsent rules that are injected before any site JavaScript runs, combined with Puppeteer Extra's stealth capabilities and Ghostery's adblocker for comprehensive privacy protection.
 
 ## Technical Details
 
 ### Architecture
 - **ES Modules**: Uses modern JavaScript module syntax
 - **Headless Browser**: Puppeteer with "new" headless mode
+- **Runtime Bundling**: Dynamic compilation of CMP rules using esbuild
 - **Memory Management**: Proper cleanup of browser resources
 - **Error Logging**: Comprehensive error handling with timestamps
+
+### Cookie Consent Engine
+- **Runtime Compilation**: Bundles `@duckduckgo/autoconsent` content script on first startup
+- **Module Caching**: Caches bundled script in memory for optimal performance
+- **Pre-execution Injection**: Injects consent handling before any site JavaScript runs
+- **Latest Rules**: Always uses the most recent CMP rules from the installed package
 
 ### Performance Optimizations
 - **Network Idle**: Waits for network to be idle before extraction
 - **Resource Blocking**: Blocks ads and trackers for faster loading
+- **Script Caching**: Bundles and caches consent rules to avoid rebuild overhead
 - **Efficient Cleanup**: Properly closes browser instances and pages
 
 ### Security Features
 - **Sandboxing**: Runs Puppeteer with security flags
 - **Input Validation**: Validates all incoming parameters
 - **Error Isolation**: Prevents sensitive information leakage
+
+## Implementation Details
+
+### Cookie Consent Helper (`autoconsent.js`)
+
+The application includes a reusable helper module that handles runtime bundling of the latest CMP rules:
+
+```javascript
+import { getAutoConsentScript } from './autoconsent.js';
+
+// Gets the bundled script (builds and caches on first call)
+const script = await getAutoConsentScript();
+```
+
+**Key Features:**
+- **Runtime Bundling**: Uses esbuild to compile the content script on first startup
+- **Module Caching**: Caches the bundled script in memory for subsequent requests
+- **No Build Step**: Automatically picks up newly-published CMP rules on server restart
+- **ES Module**: Pure ES module implementation using `createRequire()` for compatibility
+
+**How it Works:**
+1. Locates the entry point: `@duckduckgo/autoconsent/lib/content/index.js`
+2. Bundles it using esbuild with optimized browser-compatible settings
+3. Caches the result at the module level for performance
+4. Returns the cached script on subsequent calls
 
 ## Environment Variables
 
