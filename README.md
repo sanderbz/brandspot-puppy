@@ -151,7 +151,8 @@ curl -X POST http://localhost:3000/crawl \
 - **puppeteer**: Headless Chrome automation
 - **@mozilla/readability**: Article extraction library
 - **jsdom**: JavaScript implementation of DOM standards
-- **markdownify**: HTML to Markdown converter
+- **node-html-markdown**: Primary HTML to Markdown converter (fast, zero-dependency)
+- **turndown**: Fallback HTML to Markdown converter (mature, handles edge cases)
 - **node-fetch**: HTTP client for Node.js
 - **esbuild**: JavaScript bundler for runtime CMP rule compilation
 
@@ -162,7 +163,6 @@ curl -X POST http://localhost:3000/crawl \
 - **puppeteer-extra-plugin-stealth**: Stealth plugin to avoid detection (v2.11.2)
 - **esbuild**: Runtime bundling of consent scripts (v0.25.6)
 
-> **Note**: The originally requested `@inqludeit/cmp-b-gone` package does not exist. We've implemented a superior solution using runtime-bundled DuckDuckGo AutoConsent rules that are injected before any site JavaScript runs, combined with Puppeteer Extra's stealth capabilities and Ghostery's adblocker for comprehensive privacy protection.
 
 ## Technical Details
 
@@ -183,6 +183,7 @@ curl -X POST http://localhost:3000/crawl \
 - **Network Idle**: Waits for network to be idle before extraction
 - **Resource Blocking**: Blocks ads and trackers for faster loading
 - **Script Caching**: Loads and caches consent scripts to avoid file system overhead
+- **Bullet-proof Markdown**: Multi-tier conversion strategy with timeouts and fallbacks
 - **Efficient Cleanup**: Properly closes browser instances and pages
 
 ### Security Features

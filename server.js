@@ -3,7 +3,8 @@ import puppeteer from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import { Readability } from '@mozilla/readability';
 import { JSDOM } from 'jsdom';
-import markdownify from 'markdownify';
+import { NodeHtmlMarkdown } from 'node-html-markdown';
+import TurndownService from 'turndown';
 import fetch from 'node-fetch';
 import { PuppeteerBlocker } from '@ghostery/adblocker-puppeteer';
 import { getAutoConsentScript } from './autoconsent.js';
@@ -36,6 +37,60 @@ const injectAutoConsentScript = async (page) => {
   } catch (error) {
     console.log(`[${new Date().toISOString()}] AutoConsent injection failed: ${error.message}`);
   }
+};
+
+// Bullet-proof HTML to Markdown conversion with timeouts and fallbacks
+const convertToMarkdown = async (html) => {
+  const withTimeout = (promise, timeoutMs, name) => {
+    return Promise.race([
+      promise,
+      new Promise((_, reject) => 
+        setTimeout(() => reject(new Error(`${name} timeout after ${timeoutMs}ms`)), timeoutMs)
+      )
+    ]);
+  };
+
+  // Step 1: Try node-html-markdown (fastest, zero-dependency)
+  try {
+    console.log(`[${new Date().toISOString()}] Trying node-html-markdown...`);
+    const markdown = await withTimeout(
+      Promise.resolve(NodeHtmlMarkdown.translate(html)),
+      5000,
+      'node-html-markdown'
+    );
+    if (markdown && markdown.trim().length > 0) {
+      console.log(`[${new Date().toISOString()}] node-html-markdown success (${markdown.length} chars)`);
+      return markdown;
+    }
+  } catch (error) {
+    console.log(`[${new Date().toISOString()}] node-html-markdown failed: ${error.message}`);
+  }
+
+  // Step 2: Try turndown (mature, handles edge cases)
+  try {
+    console.log(`[${new Date().toISOString()}] Trying turndown...`);
+    const turndownService = new TurndownService({
+      headingStyle: 'atx',
+      codeBlockStyle: 'fenced'
+    });
+    const markdown = await withTimeout(
+      Promise.resolve(turndownService.turndown(html)),
+      5000,
+      'turndown'
+    );
+    if (markdown && markdown.trim().length > 0) {
+      console.log(`[${new Date().toISOString()}] turndown success (${markdown.length} chars)`);
+      return markdown;
+    }
+  } catch (error) {
+    console.log(`[${new Date().toISOString()}] turndown failed: ${error.message}`);
+  }
+
+  // Step 3: Last-resort plain-text fallback
+  console.log(`[${new Date().toISOString()}] Using plain-text fallback...`);
+  const textContent = html.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
+  console.log(`[${new Date().toISOString()}] Plain-text fallback (${textContent.length} chars)`);
+  return textContent;
 };
 
 // POST /crawl endpoint
@@ -106,41 +161,9 @@ fastify.post('/crawl', async (request, reply) => {
     console.log(`[${new Date().toISOString()}] Article extracted: "${article.title}"`);
 
 
-    // Convert HTML content to Markdown
+    // Convert HTML content to Markdown using bullet-proof strategy
     console.log(`[${new Date().toISOString()}] Converting to markdown...`);
-    let markdown = '';
-    try {
-      if (typeof markdownify === 'function') {
-        const markdownStream = markdownify(article.content);
-        console.log(`[${new Date().toISOString()}] Markdownify called, checking stream...`);
-        
-        // If it's a stream, collect the data
-        if (markdownStream && typeof markdownStream.on === 'function') {
-          console.log(`[${new Date().toISOString()}] Processing markdown stream...`);
-          markdown = await new Promise((resolve, reject) => {
-            let result = '';
-            markdownStream.on('data', chunk => {
-              result += chunk;
-              console.log(`[${new Date().toISOString()}] Markdown chunk received (${chunk.length} chars)`);
-            });
-            markdownStream.on('end', () => {
-              console.log(`[${new Date().toISOString()}] Markdown stream ended`);
-              resolve(result);
-            });
-            markdownStream.on('error', reject);
-          });
-        } else {
-          console.log(`[${new Date().toISOString()}] Markdownify returned direct result`);
-          markdown = markdownStream;
-        }
-      } else {
-        console.log(`[${new Date().toISOString()}] Markdownify not a function, using HTML fallback`);
-        markdown = article.content; // Fallback to HTML if markdownify fails
-      }
-    } catch (markdownError) {
-      console.log(`[${new Date().toISOString()}] Markdown conversion failed, using HTML: ${markdownError.message}`);
-      markdown = article.content;
-    }
+    const markdown = await convertToMarkdown(article.content);
     console.log(`[${new Date().toISOString()}] Markdown conversion completed (${markdown.length} chars)`);
 
     // Build response object
