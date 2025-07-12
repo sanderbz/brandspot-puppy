@@ -144,6 +144,7 @@ fastify.post('/crawl', async (request, reply) => {
     console.log(`[${new Date().toISOString()}] Markdown conversion completed (${markdown.length} chars)`);
 
     // Build response object
+    console.log(`[${new Date().toISOString()}] Building response object...`);
     const result = {
       url: url,
       title: article.title || '',
@@ -151,13 +152,16 @@ fastify.post('/crawl', async (request, reply) => {
       markdown: markdown,
       extracted_at: new Date().toISOString()
     };
+    console.log(`[${new Date().toISOString()}] Response object built`);
 
     // Handle test mode vs callback
     if (test) {
-      console.log('Test mode - Article extracted:');
+      console.log(`[${new Date().toISOString()}] Test mode - Article extracted:`);
       console.log(JSON.stringify(result, null, 2));
+      console.log(`[${new Date().toISOString()}] Sending test mode response...`);
       return reply.status(200).send({ message: 'Article extracted successfully (test mode)' });
     } else {
+      console.log(`[${new Date().toISOString()}] Production mode - posting to callback...`);
       // POST to callback URL
       try {
         const response = await fetch(callback_url, {
@@ -189,10 +193,21 @@ fastify.post('/crawl', async (request, reply) => {
     return reply.status(500).send({ error: 'Internal server error' });
   } finally {
     // Clean up resources
+    console.log(`[${new Date().toISOString()}] Starting cleanup...`);
     try {
-      if (blocker && page) await blocker.disableBlockingInPage(page);
-      if (page) await page.close();
-      if (browser) await browser.close();
+      if (blocker && page) {
+        console.log(`[${new Date().toISOString()}] Disabling adblocker...`);
+        await blocker.disableBlockingInPage(page);
+      }
+      if (page) {
+        console.log(`[${new Date().toISOString()}] Closing page...`);
+        await page.close();
+      }
+      if (browser) {
+        console.log(`[${new Date().toISOString()}] Closing browser...`);
+        await browser.close();
+      }
+      console.log(`[${new Date().toISOString()}] Cleanup completed successfully`);
     } catch (cleanupError) {
       logError(cleanupError, 'Cleanup');
     }
