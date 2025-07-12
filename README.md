@@ -19,10 +19,10 @@ A minimal, production-ready Node.js backend application that provides web crawli
 - **Better Performance**: Faster page loads by blocking unnecessary content
 
 ### 🍪 Cookie Consent Management
-- **Runtime CMP Engine**: Bundles the latest @duckduckgo/autoconsent rules at runtime
+- **Pre-built CMP Engine**: Uses the latest @duckduckgo/autoconsent content script
 - **Pre-execution Injection**: Injects consent handling before any site JavaScript runs
-- **Auto-bundling**: Uses esbuild to create optimized content scripts on first startup
-- **Rule Caching**: Caches bundled rules for optimal performance on subsequent requests
+- **Efficient Loading**: Loads pre-built content script for optimal performance
+- **Rule Caching**: Caches loaded script for optimal performance on subsequent requests
 
 ## Installation
 
@@ -39,7 +39,7 @@ pnpm install
 After installation, the app will automatically:
 - Block ads and trackers using Ghostery's advanced filtering
 - Avoid detection using Puppeteer Extra's stealth capabilities
-- Bundle and inject the latest cookie consent rules at runtime
+- Load and inject the latest cookie consent rules before page execution
 - Provide cleaner, faster crawling with enhanced privacy protection
 
 No additional configuration is required - the privacy features are enabled by default.
@@ -169,20 +169,20 @@ curl -X POST http://localhost:3000/crawl \
 ### Architecture
 - **ES Modules**: Uses modern JavaScript module syntax
 - **Headless Browser**: Puppeteer with "new" headless mode
-- **Runtime Bundling**: Dynamic compilation of CMP rules using esbuild
+- **Pre-built Scripts**: Uses optimized content scripts from package distribution
 - **Memory Management**: Proper cleanup of browser resources
 - **Error Logging**: Comprehensive error handling with timestamps
 
 ### Cookie Consent Engine
-- **Runtime Compilation**: Bundles `@duckduckgo/autoconsent` content script on first startup
-- **Module Caching**: Caches bundled script in memory for optimal performance
+- **Pre-built Script**: Uses the optimized content script from `@duckduckgo/autoconsent`
+- **Module Caching**: Caches loaded script in memory for optimal performance
 - **Pre-execution Injection**: Injects consent handling before any site JavaScript runs
 - **Latest Rules**: Always uses the most recent CMP rules from the installed package
 
 ### Performance Optimizations
 - **Network Idle**: Waits for network to be idle before extraction
 - **Resource Blocking**: Blocks ads and trackers for faster loading
-- **Script Caching**: Bundles and caches consent rules to avoid rebuild overhead
+- **Script Caching**: Loads and caches consent scripts to avoid file system overhead
 - **Efficient Cleanup**: Properly closes browser instances and pages
 
 ### Security Features
@@ -204,14 +204,14 @@ const script = await getAutoConsentScript();
 ```
 
 **Key Features:**
-- **Runtime Bundling**: Uses esbuild to compile the content script on first startup
-- **Module Caching**: Caches the bundled script in memory for subsequent requests
-- **No Build Step**: Automatically picks up newly-published CMP rules on server restart
+- **Pre-built Script**: Uses the optimized content script from the package's dist directory
+- **Module Caching**: Caches the loaded script in memory for subsequent requests
+- **No Build Step**: Uses the pre-built script from `@duckduckgo/autoconsent`
 - **ES Module**: Pure ES module implementation using `createRequire()` for compatibility
 
 **How it Works:**
-1. Locates the entry point: `@duckduckgo/autoconsent/lib/content/index.js`
-2. Bundles it using esbuild with optimized browser-compatible settings
+1. Locates the pre-built content script: `@duckduckgo/autoconsent/dist/addon-mv3/content.bundle.js`
+2. Reads the optimized script file directly
 3. Caches the result at the module level for performance
 4. Returns the cached script on subsequent calls
 
@@ -219,18 +219,6 @@ const script = await getAutoConsentScript();
 
 - `PORT`: Server port (default: 3000)
 - `NODE_ENV`: Environment mode (development/production)
-
-## License
-
-This project is licensed under the MIT License.
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests if applicable
-5. Submit a pull request
 
 ## Support
 

@@ -1,5 +1,5 @@
 import { createRequire } from 'module';
-import { build } from 'esbuild';
+import path from 'path';
 
 const require = createRequire(import.meta.url);
 
@@ -17,29 +17,18 @@ export async function getAutoConsentScript() {
   }
 
   try {
-    // Locate the autoconsent content script entry point
-    const entryPoint = require.resolve('@duckduckgo/autoconsent/lib/content/index.js');
+    // Find the package directory using the main entry point
+    const mainPath = require.resolve('@duckduckgo/autoconsent');
+    const packageDir = path.dirname(path.dirname(mainPath)); // Go up from dist/ to package root
+    const contentScriptPath = path.join(packageDir, 'dist', 'addon-mv3', 'content.bundle.js');
     
-    // Bundle the content script with esbuild
-    const result = await build({
-      entryPoints: [entryPoint],
-      bundle: true,
-      format: 'iife',
-      globalName: 'autoConsent',
-      platform: 'browser',
-      target: 'es2020',
-      write: false,
-      minify: true,
-      sourcemap: false,
-      logLevel: 'silent'
-    });
-
-    // Cache the bundled script
-    BUNDLE = result.outputFiles[0].text;
+    // Read the content script file
+    const fs = await import('fs');
+    BUNDLE = fs.readFileSync(contentScriptPath, 'utf8');
     
     return BUNDLE;
   } catch (error) {
-    console.error('Failed to bundle autoconsent script:', error);
-    throw new Error('Failed to bundle autoconsent content script');
+    console.error('Failed to load autoconsent script:', error);
+    throw new Error('Failed to load autoconsent content script');
   }
 } 
