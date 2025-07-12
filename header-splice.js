@@ -25,9 +25,10 @@ export function injectHeader(document) {
   // Find main content area to inject header into
   const mainContent = document.querySelector('main, article, .content, .post-content, .entry-content, [role="main"]') || document.body;
   
-  // Clone header and inject at the beginning of main content
-  const clonedHeader = headerEl.cloneNode(true);
-  mainContent.insertBefore(clonedHeader, mainContent.firstChild);
+  // Clone header content and wrap in neutral div so Readability processes it
+  const contentDiv = document.createElement('div');
+  contentDiv.innerHTML = headerEl.innerHTML;
+  mainContent.insertBefore(contentDiv, mainContent.firstChild);
   
   return {
     headerFound: true,

@@ -36,6 +36,12 @@ export const config = {
     waitUntil: 'networkidle0'
   },
 
+  // Content parsing settings
+  parser: {
+    // Which parser to use: 'readability' or 'defuddle'
+    engine: 'defuddle'
+  },
+
   // Markdown conversion settings
   markdown: {
     // Timeout per converter (5 seconds)

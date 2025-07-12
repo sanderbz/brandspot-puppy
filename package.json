@@ -13,6 +13,7 @@
     "@duckduckgo/autoconsent": "^14.5.1",
     "@ghostery/adblocker-puppeteer": "^2.11.1",
     "@mozilla/readability": "^0.5.0",
+    "defuddle": "^0.6.4",
     "esbuild": "^0.25.6",
     "fastify": "^4.29.1",
     "jsdom": "^24.1.3",

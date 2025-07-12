@@ -1,5 +1,6 @@
 import Fastify from 'fastify';
 import { Readability } from '@mozilla/readability';
+import Defuddle from 'defuddle';
 import { JSDOM } from 'jsdom';
 import { NodeHtmlMarkdown } from 'node-html-markdown';
 import TurndownService from 'turndown';
@@ -55,6 +56,32 @@ const logError = (error, context = '') => {
   console.error(`[${timestamp}] ERROR ${context}:`, error.message);
   if (error.stack) {
     console.error(error.stack);
+  }
+};
+
+// Parse article content using configured parser
+const parseArticle = (document) => {
+  if (config.parser.engine === 'defuddle') {
+    console.log(`[${new Date().toISOString()}] Using Defuddle parser`);
+    const defuddle = new Defuddle(document);
+    const result = defuddle.parse();
+    
+    // Normalize Defuddle output to match Readability structure
+    return {
+      title: result.title || '',
+      byline: result.byline || result.author || '',
+      dir: result.dir || null,
+      lang: result.lang || null,
+      content: result.content || '',
+      textContent: result.textContent || (result.content ? result.content.replace(/<[^>]*>/g, '') : ''),
+      length: result.length || (result.textContent || result.content || '').length,
+      excerpt: result.excerpt || result.description || '',
+      siteName: result.siteName || null
+    };
+  } else {
+    console.log(`[${new Date().toISOString()}] Using Readability parser`);
+    const reader = new Readability(document);
+    return reader.parse();
   }
 };
 
@@ -141,6 +168,7 @@ fastify.get('/health', async (request, reply) => {
     },
     config: {
       debug: config.logging.debug,
+      parser: config.parser.engine,
       navigationTimeout: config.page.navigationTimeout,
       conversionTimeout: config.markdown.conversionTimeout
     }
@@ -192,14 +220,13 @@ const processCrawlRequest = async (url, callback_url, test) => {
     const headerResult = injectHeader(document);
     console.log(`[${new Date().toISOString()}] Header injection completed - found: ${headerResult.headerFound ? `yes (${headerResult.headerTag})` : 'no'}`);
 
-    // Extract article content with Readability (now includes header)
-    console.log(`[${new Date().toISOString()}] Extracting article with Readability...`);
-    const reader = new Readability(document);
-    const article = reader.parse();
-    console.log(`[${new Date().toISOString()}] Readability extraction completed`);
+    // Extract article content with configured parser (now includes header)
+    console.log(`[${new Date().toISOString()}] Extracting article with ${config.parser.engine}...`);
+    const article = parseArticle(document);
+    console.log(`[${new Date().toISOString()}] ${config.parser.engine} extraction completed`);
 
     if (!article) {
-      logError(new Error('Failed to extract article content'), 'Readability');
+      logError(new Error('Failed to extract article content'), config.parser.engine);
       return;
     }
     console.log(`[${new Date().toISOString()}] Article extracted: "${article.title}"`);
