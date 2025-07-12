@@ -1,6 +1,4 @@
 import Fastify from 'fastify';
-import puppeteer from 'puppeteer-extra';
-import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import { Readability } from '@mozilla/readability';
 import { JSDOM } from 'jsdom';
 import { NodeHtmlMarkdown } from 'node-html-markdown';
@@ -8,13 +6,16 @@ import TurndownService from 'turndown';
 import fetch from 'node-fetch';
 import { PuppeteerBlocker } from '@ghostery/adblocker-puppeteer';
 import { getAutoConsentScript } from './autoconsent.js';
-
-// Use stealth plugin to avoid detection
-puppeteer.use(StealthPlugin());
+import { getBrowser, createPage, gracefulShutdown, getBrowserStats } from './browser.js';
+import { config } from './config.js';
 
 const fastify = Fastify({
   logger: true
 });
+
+// Handle shutdown signals
+process.on('SIGTERM', gracefulShutdown);
+process.on('SIGINT', gracefulShutdown);
 
 // Helper function to log errors with timestamp
 const logError = (error, context = '') => {
@@ -50,12 +51,14 @@ const convertToMarkdown = async (html) => {
     ]);
   };
 
+  const timeout = config.markdown.conversionTimeout;
+
   // Step 1: Try node-html-markdown (fastest, zero-dependency)
   try {
     console.log(`[${new Date().toISOString()}] Trying node-html-markdown...`);
     const markdown = await withTimeout(
       Promise.resolve(NodeHtmlMarkdown.translate(html)),
-      5000,
+      timeout,
       'node-html-markdown'
     );
     if (markdown && markdown.trim().length > 0) {
@@ -69,13 +72,10 @@ const convertToMarkdown = async (html) => {
   // Step 2: Try turndown (mature, handles edge cases)
   try {
     console.log(`[${new Date().toISOString()}] Trying turndown...`);
-    const turndownService = new TurndownService({
-      headingStyle: 'atx',
-      codeBlockStyle: 'fenced'
-    });
+    const turndownService = new TurndownService(config.markdown.turndownOptions);
     const markdown = await withTimeout(
       Promise.resolve(turndownService.turndown(html)),
-      5000,
+      timeout,
       'turndown'
     );
     if (markdown && markdown.trim().length > 0) {
@@ -93,6 +93,28 @@ const convertToMarkdown = async (html) => {
   return textContent;
 };
 
+// Health check endpoint with browser stats
+fastify.get('/health', async (request, reply) => {
+  const stats = getBrowserStats();
+  
+  return {
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    browser: {
+      initialized: stats.isInitialized,
+      requestCount: stats.requestCount,
+      ageMinutes: stats.ageMinutes,
+      maxRequests: stats.maxRequests,
+      maxAgeMinutes: Math.round(stats.maxAgeMs / 1000 / 60)
+    },
+    config: {
+      debug: config.logging.debug,
+      navigationTimeout: config.page.navigationTimeout,
+      conversionTimeout: config.markdown.conversionTimeout
+    }
+  };
+});
+
 // POST /crawl endpoint
 fastify.post('/crawl', async (request, reply) => {
   const { url, callback_url, test = false } = request.body;
@@ -106,22 +128,19 @@ fastify.post('/crawl', async (request, reply) => {
     return reply.status(400).send({ error: 'callback_url is required when test is false' });
   }
 
-  let browser;
   let page;
   let blocker;
 
   try {
-    console.log(`[${new Date().toISOString()}] Starting crawl for: ${url}`);
+    const stats = getBrowserStats();
+    console.log(`[${new Date().toISOString()}] Starting crawl for: ${url} (request #${stats.requestCount})`);
     
-    // Launch Puppeteer
-    console.log(`[${new Date().toISOString()}] Launching Puppeteer...`);
-    browser = await puppeteer.launch({
-      headless: "new",
-      args: ['--no-sandbox', '--disable-setuid-sandbox']
-    });
+    // Get persistent browser instance
+    console.log(`[${new Date().toISOString()}] Getting browser instance...`);
+    const browser = await getBrowser();
 
-    page = await browser.newPage();
-    console.log(`[${new Date().toISOString()}] Browser and page created`);
+    page = await createPage(browser);
+    console.log(`[${new Date().toISOString()}] New page created`);
 
     // Set up Ghostery adblocker
     console.log(`[${new Date().toISOString()}] Setting up Ghostery adblocker...`);
@@ -134,7 +153,7 @@ fastify.post('/crawl', async (request, reply) => {
 
     // Navigate to URL
     console.log(`[${new Date().toISOString()}] Navigating to URL...`);
-    await page.goto(url, { waitUntil: 'networkidle0' });
+    await page.goto(url, { waitUntil: config.page.waitUntil });
     console.log(`[${new Date().toISOString()}] Navigation completed`);
 
     // Get fully rendered HTML
@@ -182,7 +201,7 @@ fastify.post('/crawl', async (request, reply) => {
       console.log(`[${new Date().toISOString()}] Test mode - Article extracted:`);
       console.log(JSON.stringify(result, null, 2));
       console.log(`[${new Date().toISOString()}] Sending test mode response...`);
-      return reply.status(200).send({ message: 'Article extracted successfully (test mode)' });
+      return reply.status(202).send({ message: 'Request accepted and processed' });
     } else {
       console.log(`[${new Date().toISOString()}] Production mode - posting to callback...`);
       // POST to callback URL
@@ -215,8 +234,8 @@ fastify.post('/crawl', async (request, reply) => {
     
     return reply.status(500).send({ error: 'Internal server error' });
   } finally {
-    // Clean up resources
-    console.log(`[${new Date().toISOString()}] Starting cleanup...`);
+    // Clean up page resources (keep browser alive)
+    console.log(`[${new Date().toISOString()}] Starting page cleanup...`);
     try {
       if (blocker && page) {
         console.log(`[${new Date().toISOString()}] Disabling adblocker...`);
@@ -226,13 +245,9 @@ fastify.post('/crawl', async (request, reply) => {
         console.log(`[${new Date().toISOString()}] Closing page...`);
         await page.close();
       }
-      if (browser) {
-        console.log(`[${new Date().toISOString()}] Closing browser...`);
-        await browser.close();
-      }
-      console.log(`[${new Date().toISOString()}] Cleanup completed successfully`);
+      console.log(`[${new Date().toISOString()}] Page cleanup completed successfully`);
     } catch (cleanupError) {
-      logError(cleanupError, 'Cleanup');
+      logError(cleanupError, 'Page cleanup');
     }
   }
 });
@@ -240,9 +255,15 @@ fastify.post('/crawl', async (request, reply) => {
 // Start server
 const start = async () => {
   try {
-    const port = process.env.PORT || 3000;
-    await fastify.listen({ port, host: '0.0.0.0' });
-    console.log(`Server listening on port ${port}`);
+    await fastify.listen({ 
+      port: config.server.port, 
+      host: config.server.host 
+    });
+    console.log(`Server listening on port ${config.server.port}`);
+    
+    // Log browser stats on startup
+    const stats = getBrowserStats();
+    console.log(`Browser initialized: ${stats.isInitialized ? 'Yes' : 'No'}`);
   } catch (err) {
     logError(err, 'Server startup');
     process.exit(1);

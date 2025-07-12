@@ -58,9 +58,11 @@ npm start
 
 The server will start on port 3000 by default (configurable via PORT environment variable).
 
-### API Endpoint
+### API Endpoints
 
-**POST** `/crawl`
+#### **POST** `/crawl`
+
+Main crawling endpoint for article extraction.
 
 #### Request Body
 
@@ -80,19 +82,14 @@ The server will start on port 3000 by default (configurable via PORT environment
 
 #### Response
 
-**Test Mode** (test=true):
-```json
-{
-  "message": "Article extracted successfully (test mode)"
-}
-```
-
-**Production Mode** (test=false):
+**Both Test and Production Mode**:
 ```json
 {
   "message": "Request accepted and processed"
 }
 ```
+
+> **Note**: Both test and production modes return the same response message. In test mode, the extracted content is logged to the console instead of being sent to a callback URL.
 
 #### Extracted Content Format
 
@@ -105,6 +102,31 @@ The content sent to your callback URL or logged in test mode:
   "byline": "Author Name",
   "markdown": "# Article Title\n\nArticle content in markdown...",
   "extracted_at": "2024-01-15T12:00:00.000Z"
+}
+```
+
+#### **GET** `/health`
+
+Health check endpoint with browser statistics and configuration info.
+
+#### Response
+
+```json
+{
+  "status": "ok",
+  "timestamp": "2024-01-15T12:00:00.000Z",
+  "browser": {
+    "initialized": true,
+    "requestCount": 42,
+    "ageMinutes": 120,
+    "maxRequests": 1000,
+    "maxAgeMinutes": 1440
+  },
+  "config": {
+    "debug": false,
+    "navigationTimeout": 30000,
+    "conversionTimeout": 5000
+  }
 }
 ```
 
@@ -144,6 +166,14 @@ curl -X POST http://localhost:3000/crawl \
   }'
 ```
 
+### Health Check Example
+
+```bash
+curl http://localhost:3000/health
+```
+
+This returns browser statistics useful for monitoring performance and determining when the browser will restart.
+
 ## Dependencies
 
 ### Core Dependencies
@@ -167,9 +197,10 @@ curl -X POST http://localhost:3000/crawl \
 
 ### Architecture
 - **ES Modules**: Uses modern JavaScript module syntax
-- **Headless Browser**: Puppeteer with "new" headless mode
+- **Persistent Browser**: Single long-lived browser instance shared across requests
+- **Page-per-Request**: Lightweight page creation for concurrent request handling
 - **Pre-built Scripts**: Uses optimized content scripts from package distribution
-- **Memory Management**: Proper cleanup of browser resources
+- **Smart Memory Management**: Pages cleaned up after each request, browser persisted
 - **Error Logging**: Comprehensive error handling with timestamps
 
 ### Cookie Consent Engine
@@ -178,42 +209,101 @@ curl -X POST http://localhost:3000/crawl \
 - **Pre-execution Injection**: Injects consent handling before any site JavaScript runs
 - **Latest Rules**: Always uses the most recent CMP rules from the installed package
 
+### Browser Management Strategy
+- **Persistent Instance**: Single browser shared across all requests for maximum performance
+- **Automatic Restart**: Browser restarts after 24 hours or 1000 requests to prevent memory leaks
+- **Crash Recovery**: Gracefully handles browser disconnections with automatic reinitialization
+- **Concurrent Support**: Multiple requests can create pages simultaneously on the same browser
+- **Resource Cleanup**: Each request cleans up its page but preserves the browser instance
+- **Graceful Shutdown**: Properly closes browser on application termination signals
+
 ### Performance Optimizations
+- **Persistent Browser**: Keeps browser instance alive for up to 24 hours or 1000 requests
+- **Page Pooling**: Creates lightweight pages for each request instead of full browser instances
 - **Network Idle**: Waits for network to be idle before extraction
 - **Resource Blocking**: Blocks ads and trackers for faster loading
 - **Script Caching**: Loads and caches consent scripts to avoid file system overhead
 - **Bullet-proof Markdown**: Multi-tier conversion strategy with timeouts and fallbacks
-- **Efficient Cleanup**: Properly closes browser instances and pages
+- **Graceful Restart**: Automatically restarts browser on age/request limits or crashes
 
 ### Security Features
 - **Sandboxing**: Runs Puppeteer with security flags
 - **Input Validation**: Validates all incoming parameters
 - **Error Isolation**: Prevents sensitive information leakage
 
-## Implementation Details
+## File Structure
+
+```
+brandspot-puppy/
+├── server.js          # Main HTTP server and crawl endpoint
+├── browser.js         # Browser instance management
+├── autoconsent.js     # Cookie consent script loader
+├── config.js          # Application configuration
+├── package.json       # Dependencies and scripts
+└── README.md          # This file
+```
+
+### Configuration (`config.js`)
+
+Centralized configuration using JavaScript (not JSON) for flexibility:
+
+```javascript
+import { config } from './config.js';
+
+// Browser settings
+config.browser.maxAge           // 24 hours browser lifetime
+config.browser.maxRequests      // 1000 requests before restart
+config.browser.launchOptions    // Puppeteer launch arguments
+
+// Page settings  
+config.page.navigationTimeout   // 30 second navigation timeout
+config.page.waitUntil          // 'networkidle0' wait condition
+
+// Markdown conversion
+config.markdown.conversionTimeout  // 5 second per-converter timeout
+config.markdown.turndownOptions   // Turndown service configuration
+```
+
+**Why JavaScript config over JSON:**
+- **Comments**: Inline documentation for settings
+- **Calculations**: Dynamic values (e.g., `24 * 60 * 60 * 1000`)
+- **Environment**: Access to `process.env` variables
+- **Flexibility**: Easy to extend and modify
+
+### Browser Management (`browser.js`)
+
+High-performance persistent browser with automatic lifecycle management:
+
+```javascript
+import { getBrowser, createPage, getBrowserStats } from './browser.js';
+
+const browser = await getBrowser();    // Get shared browser instance
+const page = await createPage(browser); // Create new page with timeout
+const stats = getBrowserStats();       // Get usage statistics
+```
+
+**Key Features:**
+- **Persistent Instance**: Single browser shared across all requests
+- **Automatic Restart**: Browser restarts after 24 hours or 1000 requests
+- **Crash Recovery**: Gracefully handles browser disconnections
+- **Pre-initialization**: Browser starts when module is imported
 
 ### Cookie Consent Helper (`autoconsent.js`)
 
-The application includes a reusable helper module that handles runtime bundling of the latest CMP rules:
+Loads and caches the pre-built AutoConsent content script:
 
 ```javascript
 import { getAutoConsentScript } from './autoconsent.js';
 
-// Gets the bundled script (builds and caches on first call)
+// Gets the pre-built script (caches on first call)
 const script = await getAutoConsentScript();
 ```
 
-**Key Features:**
-- **Pre-built Script**: Uses the optimized content script from the package's dist directory
-- **Module Caching**: Caches the loaded script in memory for subsequent requests
-- **No Build Step**: Uses the pre-built script from `@duckduckgo/autoconsent`
-- **ES Module**: Pure ES module implementation using `createRequire()` for compatibility
-
 **How it Works:**
-1. Locates the pre-built content script: `@duckduckgo/autoconsent/dist/addon-mv3/content.bundle.js`
-2. Reads the optimized script file directly
-3. Caches the result at the module level for performance
-4. Returns the cached script on subsequent calls
+1. Locates package directory via `require.resolve('@duckduckgo/autoconsent')`
+2. Constructs path to pre-built content script
+3. Reads and caches the optimized script file
+4. Returns cached script on subsequent calls
 
 ## Environment Variables
 
