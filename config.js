@@ -14,9 +14,11 @@ export const config = {
     // Maximum requests before browser restart
     maxRequests: 1000,
     
+    // Run browser in headless mode (set to false for debugging)
+    headless: false,
+    
     // Puppeteer launch options
     launchOptions: {
-      headless: "new",
       args: [
         '--no-sandbox', 
         '--disable-setuid-sandbox',
@@ -40,6 +42,7 @@ export const config = {
   parser: {
     // Which parser to use: 'readability' or 'defuddle'
     engine: 'defuddle'
+    // engine: 'readability'
   },
 
   // Markdown conversion settings

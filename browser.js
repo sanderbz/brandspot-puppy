@@ -28,7 +28,12 @@ const initBrowser = async () => {
   }
 
   log('Launching new browser instance...');
-  globalBrowser = await puppeteer.launch(config.browser.launchOptions);
+  const launchOptions = {
+    ...config.browser.launchOptions,
+    headless: config.browser.headless
+  };
+  log(`Browser mode: ${config.browser.headless ? 'headless' : 'visible (non-headless)'}`);
+  globalBrowser = await puppeteer.launch(launchOptions);
   browserLaunchTime = Date.now();
   requestCount = 0;
   
