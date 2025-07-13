@@ -30,7 +30,7 @@
 ### Privacy & Stealth
 
 * **Ghostery Adblocker** — blocks ads, trackers and unnecessary resources.
-* **DuckDuckGo AutoConsent** — auto‑handles cookie banners before site scripts execute.
+
 * **Stealth plugins** — **puppeteer‑extra** & **stealth** plugin minimise bot detection.
 
 ### Resilience & Performance
@@ -176,7 +176,7 @@ All tunables are centralised in **`config.js`**.
 brandspot-puppy/
 ├─ server.js          # HTTP server & routes
 ├─ browser.js         # Browser lifecycle & page factory
-├─ autoconsent.js     # Cookie-banner suppression helper
+
 ├─ config.js          # Application settings
 ├─ package.json       # Scripts & dependencies
 └─ README.md          # You are here

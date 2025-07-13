@@ -10,7 +10,6 @@
     "postinstall": "puppeteer browsers install chrome"
   },
   "dependencies": {
-    "@duckduckgo/autoconsent": "^14.5.1",
     "@ghostery/adblocker-puppeteer": "^2.11.1",
     "@mozilla/readability": "^0.5.0",
     "defuddle": "^0.6.4",

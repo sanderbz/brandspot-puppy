@@ -1,7 +1,6 @@
 import Fastify from 'fastify';
 import fetch from 'node-fetch';
 import { PuppeteerBlocker } from '@ghostery/adblocker-puppeteer';
-import { getAutoConsentScript } from './autoconsent.js';
 import { getBrowser, createPage, shutdownBrowser, getBrowserStats } from './browser.js';
 import { config } from './config.js';
 import { parseWebpage } from './parser.js';
@@ -56,19 +55,7 @@ const logError = (error, context = '') => {
 
 
 
-// Helper function to inject autoconsent script before any site JavaScript runs
-const injectAutoConsentScript = async (page) => {
-  try {
-    const autoConsentScript = await getAutoConsentScript();
-    
-    // Inject the script before any site JavaScript runs
-    await page.evaluateOnNewDocument(autoConsentScript);
-    
-    console.log(`[${new Date().toISOString()}] AutoConsent script injected successfully`);
-  } catch (error) {
-    console.log(`[${new Date().toISOString()}] AutoConsent injection failed: ${error.message}`);
-  }
-};
+
 
 
 
@@ -115,9 +102,6 @@ const processCrawlRequest = async (url, callback_url, test) => {
     const blocker = await PuppeteerBlocker.fromPrebuiltAdsAndTracking(fetch);
     await blocker.enableBlockingInPage(page);
     console.log(`[${new Date().toISOString()}] Adblocker enabled`);
-
-    // Inject autoconsent script before any site JavaScript runs
-    await injectAutoConsentScript(page);
 
     // Navigate to URL
     console.log(`[${new Date().toISOString()}] Navigating to URL...`);
