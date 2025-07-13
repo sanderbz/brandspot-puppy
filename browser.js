@@ -1,7 +1,7 @@
 import puppeteer from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import { config } from './config.js';
-import { initializeExtension } from './extension-manager.js';
+import { initializeExtensions } from './extension-manager.js';
 
 // Use stealth plugin to avoid detection
 puppeteer.use(StealthPlugin());
@@ -30,14 +30,14 @@ const initBrowser = async () => {
 
   log('Launching new browser instance...');
   
-  // Initialize extension and get Chrome arguments
+  // Initialize extensions and get Chrome arguments
   let extensionArgs = [];
   try {
-    extensionArgs = await initializeExtension();
-    log('Extension initialized successfully');
+    extensionArgs = await initializeExtensions();
+    log('Extensions initialized successfully');
   } catch (error) {
-    log(`Warning: Failed to initialize extension: ${error.message}`);
-    log('Continuing without extension...');
+    log(`Warning: Failed to initialize extensions: ${error.message}`);
+    log('Continuing without extensions...');
   }
   
   // Combine base args with extension args
@@ -54,7 +54,7 @@ const initBrowser = async () => {
   
   log(`Browser mode: ${config.browser.headless ? 'headless' : 'visible (non-headless)'}`);
   if (extensionArgs.length > 0) {
-    log(`Loading extension with ${extensionArgs.length} Chrome arguments`);
+    log(`Loading extensions with ${extensionArgs.length} Chrome arguments`);
   }
   
   globalBrowser = await puppeteer.launch(launchOptions);

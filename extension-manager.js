@@ -11,9 +11,22 @@ const require = createRequire(import.meta.url);
  */
 
 const EXTENSIONS_DIR = './extensions';
-const EXTENSION_URL = 'https://chrome.google.com/webstore/detail/accepteer-alle-cookies/ofpnikijgfhlmmjlpkfaifhhdonchhoi';
-const EXTENSION_ID = 'ofpnikijgfhlmmjlpkfaifhhdonchhoi';
-const EXTENSION_NAME = 'accepteer-alle-cookies';
+
+// Configuration for extensions to install
+const EXTENSIONS_CONFIG = [
+  {
+    id: 'ofpnikijgfhlmmjlpkfaifhhdonchhoi',
+    name: 'accepteer-alle-cookies',
+    url: 'https://chrome.google.com/webstore/detail/accepteer-alle-cookies/ofpnikijgfhlmmjlpkfaifhhdonchhoi',
+    description: 'Accepteer alle cookies'
+  },
+//   {
+//     id: 'neooppigbkahgfdhbpbhcccgpimeaafi',
+//     name: 'superagent-automatic-cookie-consent',
+//     url: 'https://chromewebstore.google.com/detail/superagent-automatic-cook/neooppigbkahgfdhbpbhcccgpimeaafi',
+//     description: 'Superagent Automatic Cookie Consent'
+//   }
+];
 
 /**
  * Ensure extensions directory exists
@@ -232,13 +245,14 @@ async function extractZipFile(zipFilePath, extractDir) {
 }
 
 /**
- * Download the Accepteer alle cookies extension
+ * Download and extract a single extension
+ * @param {Object} extensionConfig - Extension configuration object
  * @returns {Promise<string>} Path to the extracted extension directory
  */
-export async function downloadAccepteerExtension() {
+async function downloadSingleExtension(extensionConfig) {
   await ensureExtensionsDir();
   
-  const extensionDir = path.join(EXTENSIONS_DIR, EXTENSION_NAME);
+  const extensionDir = path.join(EXTENSIONS_DIR, extensionConfig.name);
   
   // Check if extension is already downloaded and extracted
   try {
@@ -249,15 +263,15 @@ export async function downloadAccepteerExtension() {
     // Extension not found, need to download
   }
   
-  console.log(`[${new Date().toISOString()}] Downloading Accepteer alle cookies extension...`);
+  console.log(`[${new Date().toISOString()}] Downloading ${extensionConfig.description} extension...`);
   
   try {
     // Use Chrome's direct CRX download URL
-    const crxFileName = `${EXTENSION_NAME}.crx`;
+    const crxFileName = `${extensionConfig.name}.crx`;
     const crxFilePath = path.join(EXTENSIONS_DIR, crxFileName);
     
-    console.log(`[${new Date().toISOString()}] Downloading extension ID: ${EXTENSION_ID}`);
-    await downloadCrxDirect(EXTENSION_ID, crxFilePath);
+    console.log(`[${new Date().toISOString()}] Downloading extension ID: ${extensionConfig.id}`);
+    await downloadCrxDirect(extensionConfig.id, crxFilePath);
     
     console.log(`[${new Date().toISOString()}] CRX file downloaded to: ${crxFilePath}`);
     
@@ -277,40 +291,70 @@ export async function downloadAccepteerExtension() {
     return extensionDir;
     
   } catch (error) {
-    console.error(`[${new Date().toISOString()}] Failed to download extension:`, error.message);
+    console.error(`[${new Date().toISOString()}] Failed to download ${extensionConfig.description}:`, error.message);
     throw error;
   }
 }
 
 /**
- * Get Chrome arguments for loading extensions
- * @param {string} extensionPath - Path to the extracted extension directory
+ * Download all configured extensions
+ * @returns {Promise<Array<string>>} Array of paths to extracted extension directories
+ */
+export async function downloadAllExtensions() {
+  const extensionPaths = [];
+  
+  for (const extensionConfig of EXTENSIONS_CONFIG) {
+    try {
+      const extensionPath = await downloadSingleExtension(extensionConfig);
+      extensionPaths.push(extensionPath);
+    } catch (error) {
+      console.error(`[${new Date().toISOString()}] Failed to download ${extensionConfig.description}, skipping...`);
+      // Continue with other extensions
+    }
+  }
+  
+  if (extensionPaths.length === 0) {
+    throw new Error('Failed to download any extensions');
+  }
+  
+  console.log(`[${new Date().toISOString()}] Successfully downloaded ${extensionPaths.length} extension(s)`);
+  return extensionPaths;
+}
+
+/**
+ * Get Chrome arguments for loading multiple extensions
+ * @param {Array<string>} extensionPaths - Array of paths to extracted extension directories
  * @returns {Array<string>} Chrome arguments
  */
-export function getExtensionArgs(extensionPath) {
-  const absolutePath = path.resolve(extensionPath);
+export function getExtensionArgs(extensionPaths) {
+  if (!extensionPaths || extensionPaths.length === 0) {
+    return [];
+  }
+  
+  const absolutePaths = extensionPaths.map(p => path.resolve(p));
+  const pathsString = absolutePaths.join(',');
   
   return [
-    `--disable-extensions-except=${absolutePath}`,
-    `--load-extension=${absolutePath}`,
+    `--disable-extensions-except=${pathsString}`,
+    `--load-extension=${pathsString}`,
     '--disable-web-security', // Sometimes needed for extension content scripts
     '--allow-running-insecure-content' // Sometimes needed for extension functionality
   ];
 }
 
 /**
- * Initialize extension for use with Puppeteer
- * @returns {Promise<Array<string>>} Chrome arguments for loading the extension
+ * Initialize all extensions for use with Puppeteer
+ * @returns {Promise<Array<string>>} Chrome arguments for loading all extensions
  */
-export async function initializeExtension() {
+export async function initializeExtensions() {
   try {
-    const extensionPath = await downloadAccepteerExtension();
-    const args = getExtensionArgs(extensionPath);
+    const extensionPaths = await downloadAllExtensions();
+    const args = getExtensionArgs(extensionPaths);
     
-    console.log(`[${new Date().toISOString()}] Extension ready for use with Chrome arguments:`, args);
+    console.log(`[${new Date().toISOString()}] ${extensionPaths.length} extension(s) ready for use with Chrome arguments:`, args);
     return args;
   } catch (error) {
-    console.error(`[${new Date().toISOString()}] Failed to initialize extension:`, error.message);
+    console.error(`[${new Date().toISOString()}] Failed to initialize extensions:`, error.message);
     throw error;
   }
 } 
