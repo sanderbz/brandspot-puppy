@@ -20,12 +20,18 @@ const EXTENSIONS_CONFIG = [
     url: 'https://chrome.google.com/webstore/detail/accepteer-alle-cookies/ofpnikijgfhlmmjlpkfaifhhdonchhoi',
     description: 'Accepteer alle cookies'
   },
-//   {
-//     id: 'neooppigbkahgfdhbpbhcccgpimeaafi',
-//     name: 'superagent-automatic-cookie-consent',
-//     url: 'https://chromewebstore.google.com/detail/superagent-automatic-cook/neooppigbkahgfdhbpbhcccgpimeaafi',
-//     description: 'Superagent Automatic Cookie Consent'
-//   }
+  {
+    id: 'neooppigbkahgfdhbpbhcccgpimeaafi',
+    name: 'superagent-automatic-cookie-consent',
+    url: 'https://chromewebstore.google.com/detail/superagent-automatic-cook/neooppigbkahgfdhbpbhcccgpimeaafi',
+    description: 'Superagent Automatic Cookie Consent'
+  },
+  {
+    id: 'edibdbjcniadpccecjdfdjjppcpchdlm',
+    name: 'i-still-dont-care-about-cookies',
+    url: 'https://chromewebstore.google.com/detail/cookies-kunnen-mij-nog-st/edibdbjcniadpccecjdfdjjppcpchdlm',
+    description: 'I still don\'t care about cookies'
+  }
 ];
 
 /**
