@@ -40,9 +40,10 @@ export const config = {
 
   // Content parsing settings
   parser: {
-    // Which parser to use: 'readability' or 'defuddle'
-    engine: 'defuddle'
-    // engine: 'readability'
+    // Which parsers to use: array of 'readability' and/or 'defuddle'
+    engines: ['defuddle', 'readability']
+    // engines: ['readability']
+    // engines: ['defuddle', 'readability']
   },
 
   // Markdown conversion settings

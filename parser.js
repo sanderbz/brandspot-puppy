@@ -59,12 +59,17 @@ const convertToMarkdown = async (html) => {
   return textContent;
 };
 
-// Parse article content using configured parser
-const parseArticle = (document) => {
-  if (config.parser.engine === 'defuddle') {
+// Parse article content using a single parser engine
+const parseArticleWithEngine = (document, engine) => {
+  if (engine === 'defuddle') {
     console.log(`[${new Date().toISOString()}] Using Defuddle parser`);
     const defuddle = new Defuddle(document);
     const result = defuddle.parse();
+
+    console.log('--------------------------------');
+    console.log(result);
+    console.log('--------------------------------');
+
     
     // Normalize Defuddle output to match Readability structure
     return {
@@ -85,6 +90,50 @@ const parseArticle = (document) => {
   }
 };
 
+// Normalize line breaks for consistent console display
+const normalizeLineBreaks = (text) => {
+  return text
+    .replace(/\\n/g, '\n')     // Convert escaped \n to actual newlines
+    .replace(/\r\n/g, '\n')    // Convert Windows line endings
+    .replace(/\r/g, '\n');     // Convert Mac line endings
+};
+
+// Parse article content using configured parser engines and convert each to markdown
+const parseArticle = async (document) => {
+  const engines = config.parser.engines;
+  const results = [];
+
+  for (const engine of engines) {
+    const result = parseArticleWithEngine(document, engine);
+    if (result) {
+      // Convert this parser's content to markdown
+      console.log(`[${new Date().toISOString()}] Converting ${engine} result to markdown...`);
+      const markdown = await convertToMarkdown(result.content);
+      const normalizedMarkdown = normalizeLineBreaks(markdown);
+      console.log(`[${new Date().toISOString()}] ${engine} markdown result: "${result.title}"\n${normalizedMarkdown}`);
+      
+      results.push({ ...result, markdown: normalizedMarkdown });
+    } else {
+      console.log(`[${new Date().toISOString()}] ${engine} extraction failed`);
+    }
+  }
+
+  if (results.length === 0) {
+    return null;
+  }
+
+  // Use first parser's metadata, concatenate markdown with 2 linebreaks
+  const firstResult = results[0];
+  const concatenatedMarkdown = results.map(r => r.markdown).join('\n\n');
+
+  console.log(`[${new Date().toISOString()}] Combined markdown from ${engines.length} parser(s): (${concatenatedMarkdown.length} chars total)`);
+
+  return {
+    ...firstResult,
+    markdown: concatenatedMarkdown
+  };
+};
+
 // Main parsing function that handles the entire pipeline
 export const parseWebpage = async (html, url) => {
   console.log(`[${new Date().toISOString()}] Starting webpage parsing pipeline`);
@@ -100,27 +149,22 @@ export const parseWebpage = async (html, url) => {
   const headerResult = injectHeader(document);
   console.log(`[${new Date().toISOString()}] Header injection completed - found: ${headerResult.headerFound ? `yes (${headerResult.headerTag})` : 'no'}`);
 
-  // Extract article content with configured parser (now includes header)
-  console.log(`[${new Date().toISOString()}] Extracting article with ${config.parser.engine}...`);
-  const article = parseArticle(document);
-  console.log(`[${new Date().toISOString()}] ${config.parser.engine} extraction completed`);
+  // Extract article content with configured parsers (now includes header)
+  console.log(`[${new Date().toISOString()}] Extracting article with ${config.parser.engines.join(', ')}...`);
+  const article = await parseArticle(document);
+  console.log(`[${new Date().toISOString()}] ${config.parser.engines.join(', ')} extraction completed`);
 
   if (!article) {
     throw new Error('Failed to extract article content');
   }
   console.log(`[${new Date().toISOString()}] Article extracted: "${article.title}"`);
 
-  // Convert HTML content to Markdown using bullet-proof strategy
-  console.log(`[${new Date().toISOString()}] Converting to markdown...`);
-  const markdown = await convertToMarkdown(article.content);
-  console.log(`[${new Date().toISOString()}] Markdown conversion completed (${markdown.length} chars)`);
-
   // Build final result object
   return {
     url: url,
     title: article.title || '',
     byline: article.byline || '',
-    markdown: markdown,
+    markdown: article.markdown,
     extracted_at: new Date().toISOString()
   };
 }; 
