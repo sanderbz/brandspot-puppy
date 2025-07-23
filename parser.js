@@ -6,6 +6,19 @@ import TurndownService from 'turndown';
 import { injectHeader } from './header-splice.js';
 import { config } from './config.js';
 
+// Logging utilities that respect config settings and include timestamps
+const debugLog = (...args) => {
+  if (config.logging.debug) {
+    console.log(`[${new Date().toISOString()}]`, ...args);
+  }
+};
+
+const requestLog = (...args) => {
+  if (config.logging.logRequests) {
+    console.log(`[${new Date().toISOString()}]`, ...args);
+  }
+};
+
 // Bullet-proof HTML to Markdown conversion with timeouts and fallbacks
 const convertToMarkdown = async (html) => {
   const withTimeout = (promise, timeoutMs, name) => {
@@ -21,23 +34,23 @@ const convertToMarkdown = async (html) => {
 
   // Step 1: Try node-html-markdown (fastest, zero-dependency)
   try {
-    console.log(`[${new Date().toISOString()}] Trying node-html-markdown...`);
+    debugLog('Trying node-html-markdown...');
     const markdown = await withTimeout(
       Promise.resolve(NodeHtmlMarkdown.translate(html)),
       timeout,
       'node-html-markdown'
     );
     if (markdown && markdown.trim().length > 0) {
-      console.log(`[${new Date().toISOString()}] node-html-markdown success (${markdown.length} chars)`);
+      debugLog(`node-html-markdown success (${markdown.length} chars)`);
       return markdown;
     }
   } catch (error) {
-    console.log(`[${new Date().toISOString()}] node-html-markdown failed: ${error.message}`);
+    debugLog(`node-html-markdown failed: ${error.message}`);
   }
 
   // Step 2: Try turndown (mature, handles edge cases)
   try {
-    console.log(`[${new Date().toISOString()}] Trying turndown...`);
+    debugLog('Trying turndown...');
     const turndownService = new TurndownService(config.markdown.turndownOptions);
     const markdown = await withTimeout(
       Promise.resolve(turndownService.turndown(html)),
@@ -45,30 +58,33 @@ const convertToMarkdown = async (html) => {
       'turndown'
     );
     if (markdown && markdown.trim().length > 0) {
-      console.log(`[${new Date().toISOString()}] turndown success (${markdown.length} chars)`);
+      debugLog(`turndown success (${markdown.length} chars)`);
       return markdown;
     }
   } catch (error) {
-    console.log(`[${new Date().toISOString()}] turndown failed: ${error.message}`);
+    debugLog(`turndown failed: ${error.message}`);
   }
 
   // Step 3: Last-resort plain-text fallback
-  console.log(`[${new Date().toISOString()}] Using plain-text fallback...`);
+  debugLog('Using plain-text fallback...');
   const textContent = html.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
-  console.log(`[${new Date().toISOString()}] Plain-text fallback (${textContent.length} chars)`);
+  debugLog(`Plain-text fallback (${textContent.length} chars)`);
   return textContent;
 };
 
 // Parse article content using a single parser engine
 const parseArticleWithEngine = (document, engine) => {
   if (engine === 'defuddle') {
-    console.log(`[${new Date().toISOString()}] Using Defuddle parser`);
+    requestLog(`Using Defuddle parser`);
     const defuddle = new Defuddle(document);
     const result = defuddle.parse();
 
-    console.log('--------------------------------');
-    console.log(result);
-    console.log('--------------------------------');
+    // Only log full result content when debug is enabled
+    if (config.logging.debug) {
+      console.log('--------------------------------');
+      console.log(result);
+      console.log('--------------------------------');
+    }
 
     
     // Normalize Defuddle output to match Readability structure
@@ -84,7 +100,7 @@ const parseArticleWithEngine = (document, engine) => {
       siteName: result.siteName || null
     };
   } else {
-    console.log(`[${new Date().toISOString()}] Using Readability parser`);
+    requestLog(`Using Readability parser`);
     const reader = new Readability(document);
     return reader.parse();
   }
@@ -93,9 +109,11 @@ const parseArticleWithEngine = (document, engine) => {
 // Normalize line breaks for consistent console display
 const normalizeLineBreaks = (text) => {
   return text
-    .replace(/\\n/g, '\n')     // Convert escaped \n to actual newlines
-    .replace(/\r\n/g, '\n')    // Convert Windows line endings
-    .replace(/\r/g, '\n');     // Convert Mac line endings
+    .replace(/\\n\\n/g, '\n\n')  // Convert double escaped newlines first
+    .replace(/\\n/g, '\n')       // Convert escaped \n to actual newlines
+    .replace(/\r\n/g, '\n')      // Convert Windows line endings
+    .replace(/\r/g, '\n')        // Convert Mac line endings
+    .replace(/\n{3,}/g, '\n\n'); // Normalize multiple newlines to max 2
 };
 
 // Parse article content using configured parser engines and convert each to markdown
@@ -107,14 +125,23 @@ const parseArticle = async (document) => {
     const result = parseArticleWithEngine(document, engine);
     if (result) {
       // Convert this parser's content to markdown
-      console.log(`[${new Date().toISOString()}] Converting ${engine} result to markdown...`);
+      requestLog(`Converting ${engine} result to markdown...`);
       const markdown = await convertToMarkdown(result.content);
+      
+      // Debug: Show raw markdown format
+      debugLog(`${engine} raw markdown contains: ${markdown.includes('\\n') ? 'escaped newlines' : 'actual newlines'}`);
+      
       const normalizedMarkdown = normalizeLineBreaks(markdown);
-      console.log(`[${new Date().toISOString()}] ${engine} markdown result: "${result.title}"\n${normalizedMarkdown}`);
+      // Only log full markdown content when debug is enabled
+      if (config.logging.debug) {
+        console.log(`[${new Date().toISOString()}] ${engine} markdown result: "${result.title}"\n${normalizedMarkdown}`);
+      } else {
+        requestLog(`${engine} markdown result: "${result.title}" (${normalizedMarkdown.length} chars)`);
+      }
       
       results.push({ ...result, markdown: normalizedMarkdown });
     } else {
-      console.log(`[${new Date().toISOString()}] ${engine} extraction failed`);
+      requestLog(`${engine} extraction failed`);
     }
   }
 
@@ -126,7 +153,7 @@ const parseArticle = async (document) => {
   const firstResult = results[0];
   const concatenatedMarkdown = results.map(r => r.markdown).join('\n\n');
 
-  console.log(`[${new Date().toISOString()}] Combined markdown from ${engines.length} parser(s): (${concatenatedMarkdown.length} chars total)`);
+  requestLog(`Combined markdown from ${engines.length} parser(s): (${concatenatedMarkdown.length} chars total)`);
 
   return {
     ...firstResult,
@@ -136,28 +163,28 @@ const parseArticle = async (document) => {
 
 // Main parsing function that handles the entire pipeline
 export const parseWebpage = async (html, url) => {
-  console.log(`[${new Date().toISOString()}] Starting webpage parsing pipeline`);
+  requestLog('Starting webpage parsing pipeline');
   
   // Parse HTML with jsdom
-  console.log(`[${new Date().toISOString()}] Parsing HTML with jsdom...`);
+  debugLog('Parsing HTML with jsdom...');
   const dom = new JSDOM(html, { url });
   const document = dom.window.document;
-  console.log(`[${new Date().toISOString()}] DOM created`);
+  debugLog('DOM created');
 
   // Inject header into DOM before Readability processing
-  console.log(`[${new Date().toISOString()}] Injecting header into DOM...`);
+  debugLog('Injecting header into DOM...');
   const headerResult = injectHeader(document);
-  console.log(`[${new Date().toISOString()}] Header injection completed - found: ${headerResult.headerFound ? `yes (${headerResult.headerTag})` : 'no'}`);
+  debugLog(`Header injection completed - found: ${headerResult.headerFound ? `yes (${headerResult.headerTag})` : 'no'}`);
 
   // Extract article content with configured parsers (now includes header)
-  console.log(`[${new Date().toISOString()}] Extracting article with ${config.parser.engines.join(', ')}...`);
+  requestLog(`Extracting article with ${config.parser.engines.join(', ')}...`);
   const article = await parseArticle(document);
-  console.log(`[${new Date().toISOString()}] ${config.parser.engines.join(', ')} extraction completed`);
+  requestLog(`${config.parser.engines.join(', ')} extraction completed`);
 
   if (!article) {
     throw new Error('Failed to extract article content');
   }
-  console.log(`[${new Date().toISOString()}] Article extracted: "${article.title}"`);
+  requestLog(`Article extracted: "${article.title}"`);
 
   // Build final result object
   return {

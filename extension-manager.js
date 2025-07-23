@@ -3,8 +3,22 @@ import { promises as fs } from 'fs';
 import { createRequire } from 'module';
 import yauzl from 'yauzl';
 import fetch from 'node-fetch';
+import { config } from './config.js';
 
 const require = createRequire(import.meta.url);
+
+// Logging utilities that respect config settings and include timestamps
+const debugLog = (...args) => {
+  if (config.logging.debug) {
+    console.log(`[${new Date().toISOString()}]`, ...args);
+  }
+};
+
+const requestLog = (...args) => {
+  if (config.logging.logRequests) {
+    console.log(`[${new Date().toISOString()}]`, ...args);
+  }
+};
 
 /**
  * Extension Manager - Downloads and manages Chrome extensions for Puppeteer
@@ -54,7 +68,7 @@ async function downloadCrxDirect(extensionId, outputPath) {
   // Chrome's official CRX download URL
   const downloadUrl = `https://clients2.google.com/service/update2/crx?response=redirect&prodversion=131.0.6778.204&acceptformat=crx2,crx3&x=id%3D${extensionId}%26uc&nacl_arch=x86-64`;
   
-  console.log(`[${new Date().toISOString()}] Fetching CRX from: ${downloadUrl}`);
+  debugLog(`Fetching CRX from: ${downloadUrl}`);
   
   try {
     const response = await fetch(downloadUrl, {
@@ -74,7 +88,7 @@ async function downloadCrxDirect(extensionId, outputPath) {
     }
     
     const contentType = response.headers.get('content-type');
-    console.log(`[${new Date().toISOString()}] Response content type: ${contentType}`);
+    debugLog(`Response content type: ${contentType}`);
     
     const arrayBuffer = await response.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
@@ -83,7 +97,7 @@ async function downloadCrxDirect(extensionId, outputPath) {
       throw new Error('Downloaded file is empty');
     }
     
-    console.log(`[${new Date().toISOString()}] Downloaded ${buffer.length} bytes`);
+    debugLog(`Downloaded ${buffer.length} bytes`);
     
     // Ensure output directory exists
     await fs.mkdir(path.dirname(outputPath), { recursive: true });
@@ -91,7 +105,7 @@ async function downloadCrxDirect(extensionId, outputPath) {
     // Write the file
     await fs.writeFile(outputPath, buffer);
     
-    console.log(`[${new Date().toISOString()}] CRX file saved to: ${outputPath}`);
+    debugLog(`CRX file saved to: ${outputPath}`);
     
   } catch (error) {
     throw new Error(`Failed to download CRX: ${error.message}`);
@@ -124,7 +138,7 @@ async function extractCrxFile(crxFilePath, extractDir) {
     
     // Read version
     const version = crxBuffer.readUInt32LE(4);
-    console.log(`[${new Date().toISOString()}] CRX version: ${version}`);
+    debugLog(`CRX version: ${version}`);
     
     let zipStart;
     
@@ -158,7 +172,7 @@ async function extractCrxFile(crxFilePath, extractDir) {
       const headerLength = crxBuffer.readUInt32LE(8);
       zipStart = 12 + headerLength;
       
-      console.log(`[${new Date().toISOString()}] CRX3 header length: ${headerLength}, ZIP starts at: ${zipStart}`);
+      debugLog(`CRX3 header length: ${headerLength}, ZIP starts at: ${zipStart}`);
       
     } else {
       throw new Error(`Unsupported CRX version: ${version}`);
@@ -170,7 +184,7 @@ async function extractCrxFile(crxFilePath, extractDir) {
     
     // Extract ZIP portion
     const zipBuffer = crxBuffer.slice(zipStart);
-    console.log(`[${new Date().toISOString()}] Extracted ZIP data: ${zipBuffer.length} bytes`);
+    debugLog(`Extracted ZIP data: ${zipBuffer.length} bytes`);
     
     // Write ZIP data to temporary file
     const tempZipPath = crxFilePath + '.zip';
@@ -263,33 +277,33 @@ async function downloadSingleExtension(extensionConfig) {
   // Check if extension is already downloaded and extracted
   try {
     await fs.access(extensionDir);
-    console.log(`[${new Date().toISOString()}] Extension already exists: ${extensionDir}`);
+    debugLog(`Extension already exists: ${extensionDir}`);
     return extensionDir;
   } catch (error) {
     // Extension not found, need to download
   }
   
-  console.log(`[${new Date().toISOString()}] Downloading ${extensionConfig.description} extension...`);
+  requestLog(`Downloading ${extensionConfig.description} extension...`);
   
   try {
     // Use Chrome's direct CRX download URL
     const crxFileName = `${extensionConfig.name}.crx`;
     const crxFilePath = path.join(EXTENSIONS_DIR, crxFileName);
     
-    console.log(`[${new Date().toISOString()}] Downloading extension ID: ${extensionConfig.id}`);
+    debugLog(`Downloading extension ID: ${extensionConfig.id}`);
     await downloadCrxDirect(extensionConfig.id, crxFilePath);
     
-    console.log(`[${new Date().toISOString()}] CRX file downloaded to: ${crxFilePath}`);
+    debugLog(`CRX file downloaded to: ${crxFilePath}`);
     
     // Now we need to extract the .crx file to the extension directory
     await extractCrxFile(crxFilePath, extensionDir);
     
-    console.log(`[${new Date().toISOString()}] Extension extracted to: ${extensionDir}`);
+    debugLog(`Extension extracted to: ${extensionDir}`);
     
     // Clean up the .crx file
     try {
       await fs.unlink(crxFilePath);
-      console.log(`[${new Date().toISOString()}] Cleaned up CRX file`);
+      debugLog('Cleaned up CRX file');
     } catch (cleanupError) {
       console.warn(`[${new Date().toISOString()}] Warning: Could not clean up CRX file: ${cleanupError.message}`);
     }
@@ -323,7 +337,7 @@ export async function downloadAllExtensions() {
     throw new Error('Failed to download any extensions');
   }
   
-  console.log(`[${new Date().toISOString()}] Successfully downloaded ${extensionPaths.length} extension(s)`);
+  requestLog(`Successfully downloaded ${extensionPaths.length} extension(s)`);
   return extensionPaths;
 }
 
@@ -357,7 +371,7 @@ export async function initializeExtensions() {
     const extensionPaths = await downloadAllExtensions();
     const args = getExtensionArgs(extensionPaths);
     
-    console.log(`[${new Date().toISOString()}] ${extensionPaths.length} extension(s) ready for use with Chrome arguments:`, args);
+    debugLog(`${extensionPaths.length} extension(s) ready for use with Chrome arguments:`, args);
     return args;
   } catch (error) {
     console.error(`[${new Date().toISOString()}] Failed to initialize extensions:`, error.message);

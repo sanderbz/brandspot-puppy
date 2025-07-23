@@ -9,6 +9,19 @@ const fastify = Fastify({
   logger: true
 });
 
+// Logging utilities that respect config settings and include timestamps
+const debugLog = (...args) => {
+  if (config.logging.debug) {
+    console.log(`[${new Date().toISOString()}]`, ...args);
+  }
+};
+
+const requestLog = (...args) => {
+  if (config.logging.logRequests) {
+    console.log(`[${new Date().toISOString()}]`, ...args);
+  }
+};
+
 // Graceful shutdown handler
 let isShuttingDown = false;
 const gracefulShutdown = async (signal) => {
@@ -53,12 +66,6 @@ const logError = (error, context = '') => {
   }
 };
 
-
-
-
-
-
-
 // Health check endpoint with browser stats
 fastify.get('/health', async (request, reply) => {
   const stats = getBrowserStats();
@@ -88,42 +95,45 @@ const processCrawlRequest = async (url, callback_url, test) => {
 
   try {
     const stats = getBrowserStats();
-    console.log(`[${new Date().toISOString()}] Starting background crawl for: ${url} (request #${stats.requestCount})`);
+    requestLog(`Starting background crawl for: ${url} (request #${stats.requestCount})`);
     
     // Get persistent browser instance
-    console.log(`[${new Date().toISOString()}] Getting browser instance...`);
+    debugLog('Getting browser instance...');
     const browser = await getBrowser();
 
     page = await createPage(browser);
-    console.log(`[${new Date().toISOString()}] New page created`);
+    debugLog('New page created');
 
     // Set up Ghostery adblocker
-    console.log(`[${new Date().toISOString()}] Setting up Ghostery adblocker...`);
+    debugLog('Setting up Ghostery adblocker...');
     const blocker = await PuppeteerBlocker.fromPrebuiltAdsAndTracking(fetch);
     await blocker.enableBlockingInPage(page);
-    console.log(`[${new Date().toISOString()}] Adblocker enabled`);
+    debugLog('Adblocker enabled');
 
     // Navigate to URL
-    console.log(`[${new Date().toISOString()}] Navigating to URL...`);
+    debugLog('Navigating to URL...');
     await page.goto(url, { waitUntil: config.page.waitUntil });
-    console.log(`[${new Date().toISOString()}] Navigation completed`);
+    debugLog('Navigation completed');
 
     // Get fully rendered HTML
-    console.log(`[${new Date().toISOString()}] Getting page content...`);
+    debugLog('Getting page content...');
     const html = await page.content();
-    console.log(`[${new Date().toISOString()}] HTML content retrieved (${html.length} chars)`);
+    debugLog(`HTML content retrieved (${html.length} chars)`);
 
     // Parse webpage using the parser module
-    console.log(`[${new Date().toISOString()}] Processing webpage with parser module...`);
+    debugLog('Processing webpage with parser module...');
     const result = await parseWebpage(html, url);
-    console.log(`[${new Date().toISOString()}] Webpage parsing completed`);
+    debugLog('Webpage parsing completed');
 
     // Handle test mode vs callback
     if (test) {
-      console.log(`[${new Date().toISOString()}] Test mode - Article extracted:`);
-      console.log(JSON.stringify(result, null, 2));
+      requestLog(`Test mode - Article extracted: "${result.title}" (${result.markdown.length} chars)`);
+      // Only log full JSON result when debug is enabled
+      if (config.logging.debug) {
+        console.log(JSON.stringify(result, null, 2));
+      }
     } else {
-      console.log(`[${new Date().toISOString()}] Production mode - posting to callback...`);
+      requestLog('Production mode - posting to callback...');
       // POST to callback URL
       try {
         const response = await fetch(callback_url, {
@@ -137,7 +147,7 @@ const processCrawlRequest = async (url, callback_url, test) => {
         if (!response.ok) {
           logError(new Error(`Callback request failed with status ${response.status}`), 'Callback');
         } else {
-          console.log(`[${new Date().toISOString()}] Successfully posted to callback`);
+          requestLog('Successfully posted to callback');
         }
       } catch (callbackError) {
         logError(callbackError, 'Callback');
@@ -148,13 +158,13 @@ const processCrawlRequest = async (url, callback_url, test) => {
     logError(error, 'Background crawling');
   } finally {
     // Clean up page resources (keep browser alive)
-    console.log(`[${new Date().toISOString()}] Starting page cleanup...`);
+    debugLog('Starting page cleanup...');
     try {
       if (page) {
-        console.log(`[${new Date().toISOString()}] Closing page...`);
+        debugLog('Closing page...');
         await page.close();
       }
-      console.log(`[${new Date().toISOString()}] Page cleanup completed successfully`);
+      debugLog('Page cleanup completed successfully');
     } catch (cleanupError) {
       logError(cleanupError, 'Page cleanup');
     }
@@ -174,7 +184,7 @@ fastify.post('/crawl', async (request, reply) => {
     return reply.status(400).send({ error: 'callback_url is required when test is false' });
   }
 
-  console.log(`[${new Date().toISOString()}] Crawl request received for: ${url} (test: ${test})`);
+  requestLog(`Crawl request received for: ${url} (test: ${test})`);
 
   // Start background processing (fire-and-forget)
   processCrawlRequest(url, callback_url, test).catch(error => {
@@ -182,7 +192,7 @@ fastify.post('/crawl', async (request, reply) => {
   });
 
   // Immediately respond to client
-  console.log(`[${new Date().toISOString()}] Responding immediately to client`);
+  requestLog('Responding immediately to client');
   return reply.status(202).send({ message: 'Request accepted and processed' });
 });
 

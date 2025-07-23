@@ -62,7 +62,7 @@ export const config = {
   // Logging settings
   logging: {
     // Enable detailed debug logging
-    debug: process.env.NODE_ENV !== 'production',
+    debug: false, // process.env.NODE_ENV !== 'production',
     
     // Log request details
     logRequests: true
