@@ -205,6 +205,22 @@ const start = async () => {
     });
     console.log(`Server listening on port ${config.server.port}`);
     
+    // Log current configuration
+    console.log('Configuration:', JSON.stringify({
+      server: config.server,
+      browser: {
+        headless: config.browser.headless,
+        maxAge: config.browser.maxAge,
+        maxRequests: config.browser.maxRequests
+      },
+      page: config.page,
+      parser: config.parser,
+      markdown: {
+        conversionTimeout: config.markdown.conversionTimeout
+      },
+      logging: config.logging
+    }, null, 2));
+    
     // Log browser stats on startup
     const stats = getBrowserStats();
     console.log(`Browser initialized: ${stats.isInitialized ? 'Yes' : 'No'}`);
