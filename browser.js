@@ -10,6 +10,7 @@ puppeteer.use(StealthPlugin());
 let globalBrowser = null;
 let browserLaunchTime = null;
 let requestCount = 0;
+let browserInitPromise = null;
 
 // Helper function for logging
 const log = (message) => {
@@ -86,7 +87,16 @@ export const getBrowser = async () => {
       log(`Browser restart: max requests reached (${requestCount})`);
     }
     
-    await initBrowser();
+    // If another request is already initializing, wait for it
+    if (browserInitPromise) {
+      await browserInitPromise;
+    } else {
+      // Start initialization and store the promise
+      browserInitPromise = initBrowser().finally(() => {
+        browserInitPromise = null;
+      });
+      await browserInitPromise;
+    }
   }
   
   requestCount++;
