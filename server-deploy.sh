@@ -136,8 +136,33 @@ NODE_ENV=production
 PORT=${PORT}
 HOST=127.0.0.1
 HEADLESS=true
+PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 EOF
   sudo chmod 0644 "${ENV_FILE}"
+}
+
+ensure_chromium_and_env() {
+  # Try to ensure a system chromium is present and set executable path for puppeteer
+  local exe=""
+  if command -v apt-get >/dev/null 2>&1; then
+    sudo apt-get update -y || true
+    sudo apt-get install -y chromium || sudo apt-get install -y chromium-browser || true
+  fi
+
+  if command -v chromium >/dev/null 2>&1; then exe="$(command -v chromium)"; fi
+  if [[ -z "${exe}" ]] && command -v chromium-browser >/dev/null 2>&1; then exe="$(command -v chromium-browser)"; fi
+
+  if [[ -n "${exe}" ]]; then
+    log "Configuring PUPPETEER_EXECUTABLE_PATH=${exe}"
+    # Remove any previous line and append
+    sudo sed -i '/^PUPPETEER_EXECUTABLE_PATH=/d' "${ENV_FILE}" || true
+    echo "PUPPETEER_EXECUTABLE_PATH=${exe}" | sudo tee -a "${ENV_FILE}" >/dev/null
+  else
+    log "System chromium not found; relying on puppeteer-provided Chromium"
+  fi
+
+  # Remove any accidentally downloaded x64 Chrome cache to avoid confusion
+  sudo -u "${DEPLOY_USER}" rm -rf "/home/${DEPLOY_USER}/.cache/puppeteer/chrome" || true
 }
 
 write_systemd_unit() {
@@ -269,6 +294,7 @@ main() {
   install_system_packages
   ensure_node_runtime
   write_env_file
+  ensure_chromium_and_env
   install_node_dependencies
   run_build_if_available
   detect_entrypoint
@@ -276,7 +302,11 @@ main() {
   write_systemd_unit
   check_port_free_or_stop
   reload_enable_start
-  wait_for_port || fail "Port ${PORT} did not open"
+  if ! wait_for_port; then
+    log "Service did not open port in time; recent logs:"
+    sudo journalctl -u "${SERVICE_NAME}" -n 200 --no-pager || true
+    fail "Port ${PORT} did not open"
+  fi
   health_check
   log "Deployment complete. Follow logs with: sudo journalctl -u ${SERVICE_NAME} -f"
 }
