@@ -27,7 +27,12 @@ main() {
   fi
 
   log "Creating remote work dir"
-  ssh -o StrictHostKeyChecking=accept-new "${SERVER_USER_HOST}" "sudo mkdir -p '${WRK_DIR_REMOTE}' && sudo chown \"$(id -un)\":www-data '${WRK_DIR_REMOTE}' || true"
+  ssh -o StrictHostKeyChecking=accept-new "${SERVER_USER_HOST}" "\
+    if [ -d '${WRK_DIR_REMOTE}' ]; then \
+      sudo chown -R \$(whoami) '${WRK_DIR_REMOTE}' 2>/dev/null || sudo chmod 0777 '${WRK_DIR_REMOTE}' 2>/dev/null || true; \
+    else \
+      mkdir -p '${WRK_DIR_REMOTE}'; \
+    fi"
 
   log "Uploading server-deploy.sh"
   scp -q server-deploy.sh "${SERVER_USER_HOST}:${SERVER_SCRIPT_REMOTE}"
