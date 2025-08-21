@@ -3,7 +3,7 @@ export const config = {
   // Server settings
   server: {
     port: process.env.PORT || 3000,
-    host: '0.0.0.0'
+    host: process.env.HOST || '127.0.0.1'
   },
 
   // Browser management settings
@@ -14,8 +14,14 @@ export const config = {
     // Maximum requests before browser restart
     maxRequests: 1000,
     
-    // Run browser in headless mode (set to false for debugging)
-    headless: false,
+    // Run browser in headless mode (true in production by default, overridable via HEADLESS)
+    headless: (() => {
+      if (typeof process.env.HEADLESS === 'string') {
+        const v = process.env.HEADLESS.toLowerCase();
+        return v === '1' || v === 'true' || v === 'yes';
+      }
+      return process.env.NODE_ENV === 'production';
+    })(),
     
     // Puppeteer launch options
     launchOptions: {
