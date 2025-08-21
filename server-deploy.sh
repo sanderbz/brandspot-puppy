@@ -171,7 +171,7 @@ ensure_chromium_and_env() {
 }
 
 write_systemd_unit() {
-  log "Writing systemd unit: ${SERVICE_FILE}"
+  log "Writing systemd unit: ${SERVICE_FILE} (Node: ${NODE_BIN}, Entrypoint: ${ENTRYPOINT_PATH})"
   sudo tee "${SERVICE_FILE}" >/dev/null <<EOF
 [Unit]
 Description=BrandSpot Puppy Crawler
@@ -182,7 +182,7 @@ Wants=network-online.target
 User=${DEPLOY_USER}
 WorkingDirectory=${APP_DIR}
 EnvironmentFile=${ENV_FILE}
-ExecStart=${NODE_BIN} ${ENTRYPOINT_PATH}
+ExecStart=/bin/bash -lc 'source ${NVM_DIR}/nvm.sh && exec node ${ENTRYPOINT_PATH}'
 Restart=always
 RestartSec=2
 KillSignal=SIGTERM
