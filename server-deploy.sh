@@ -37,7 +37,9 @@ pkg_install_debian() {
     ca-certificates curl gnupg lsof \
     fontconfig fonts-liberation \
     libx11-6 libx11-xcb1 libnss3 libatk-bridge2.0-0 libxcomposite1 libxdamage1 libxfixes3 \
-    libgbm1 libgtk-3-0 libasound2 libxrandr2 libpango-1.0-0 libpangocairo-1.0-0 libatspi2.0-0 libglib2.0-0 jq || true
+    libgbm1 libgtk-3-0 libxrandr2 libpango-1.0-0 libpangocairo-1.0-0 libatspi2.0-0 libglib2.0-0 jq || true
+  # asound package name differs on Ubuntu 24.04 (libasound2t64)
+  sudo apt-get install -y libasound2t64 || sudo apt-get install -y libasound2 || true
 }
 
 pkg_install_rhel() {
@@ -85,7 +87,7 @@ ensure_node_runtime() {
   if [[ -s "${NVM_DIR}/nvm.sh" ]] && \
      sudo -u "${DEPLOY_USER}" bash -lc "source '${NVM_DIR}/nvm.sh'; nvm ls 20.17.0 >/dev/null 2>&1"; then
     log "Found Node 20.17.0 via nvm"
-    sudo -u "${DEPLOY_USER}" bash -lc "source '${NVM_DIR}/nvm.sh'; nvm use 20.17.0 >/dev/null; corepack enable || true; corepack prepare pnpm@latest --activate || true"
+    sudo -u "${DEPLOY_USER}" bash -lc "source '${NVM_DIR}/nvm.sh'; nvm use 20.17.0 >/dev/null"
     return
   fi
 
@@ -101,8 +103,7 @@ ensure_node_runtime() {
     nvm install 20.17.0; \
     nvm alias default 20.17.0; \
     node -v; \
-    corepack enable || true; \
-    corepack prepare pnpm@latest --activate || true"
+    true"
 }
 
 resolve_node_bin() {
@@ -181,11 +182,7 @@ install_node_dependencies() {
     set -Eeuo pipefail; \
     source '${NVM_DIR}/nvm.sh'; \
     cd '${APP_DIR}'; \
-    if command -v pnpm >/dev/null 2>&1; then \
-      pnpm install --frozen-lockfile || pnpm install; \
-    else \
-      if [[ -f package-lock.json ]]; then npm ci || npm install; else npm install; fi; \
-    fi"
+    if [[ -f package-lock.json ]]; then npm ci || npm install; else npm install; fi;"
 }
 
 run_build_if_available() {
@@ -196,11 +193,7 @@ run_build_if_available() {
       set -Eeuo pipefail; \
       source '${NVM_DIR}/nvm.sh'; \
       cd '${APP_DIR}'; \
-      if command -v pnpm >/dev/null 2>&1; then \
-        pnpm -s build; \
-      else \
-        npm run -s build; \
-      fi"
+      npm run -s build;"
   else
     log "No build script found; skipping build"
   fi
