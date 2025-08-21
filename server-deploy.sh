@@ -182,17 +182,15 @@ Wants=network-online.target
 User=${DEPLOY_USER}
 WorkingDirectory=${APP_DIR}
 EnvironmentFile=${ENV_FILE}
-ExecStart=/bin/bash -lc 'source ${NVM_DIR}/nvm.sh && exec node ${ENTRYPOINT_PATH}'
+ExecStart=${NODE_BIN} ${ENTRYPOINT_PATH}
 Restart=always
 RestartSec=2
 KillSignal=SIGTERM
 TimeoutStopSec=3
 NoNewPrivileges=true
 ProtectSystem=full
-ProtectHome=true
+ProtectHome=false
 PrivateTmp=true
-CapabilityBoundingSet=
-AmbientCapabilities=
 
 [Install]
 WantedBy=multi-user.target
