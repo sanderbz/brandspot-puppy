@@ -69,7 +69,7 @@ ensure_paths_and_dirs() {
     log "App directory missing; cloning ${REPO_URL} (branch ${BRANCH})"
     require_cmd git
     sudo mkdir -p "$(dirname "${APP_DIR}")"
-    sudo chown "${DEPLOY_USER}:www-data" "$(dirname "${APP_DIR}")"
+    sudo chown "${DEPLOY_USER}:${DEPLOY_USER}" "$(dirname "${APP_DIR}")" || sudo chown "${DEPLOY_USER}:www-data" "$(dirname "${APP_DIR}")" || true
     sudo -u "${DEPLOY_USER}" bash -lc "\
       set -Eeuo pipefail; \
       git clone --branch '${BRANCH}' --depth 1 '${REPO_URL}' '${APP_DIR}'"
@@ -136,7 +136,6 @@ NODE_ENV=production
 PORT=${PORT}
 HOST=127.0.0.1
 HEADLESS=true
-PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 EOF
   sudo chmod 0644 "${ENV_FILE}"
 }
@@ -145,6 +144,7 @@ ensure_chromium_and_env() {
   # Try to ensure a system chromium is present and set executable path for puppeteer
   local exe=""
   if command -v apt-get >/dev/null 2>&1; then
+    log "Installing system Chromium for ARM64"
     sudo apt-get update -y || true
     sudo apt-get install -y chromium || sudo apt-get install -y chromium-browser || true
   fi
@@ -157,8 +157,13 @@ ensure_chromium_and_env() {
     # Remove any previous line and append
     sudo sed -i '/^PUPPETEER_EXECUTABLE_PATH=/d' "${ENV_FILE}" || true
     echo "PUPPETEER_EXECUTABLE_PATH=${exe}" | sudo tee -a "${ENV_FILE}" >/dev/null
+    # Skip bundled download when using system chromium
+    sudo sed -i '/^PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=/d' "${ENV_FILE}" || true
+    echo "PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true" | sudo tee -a "${ENV_FILE}" >/dev/null
   else
-    log "System chromium not found; relying on puppeteer-provided Chromium"
+    log "System chromium not found; allowing puppeteer download"
+    # Ensure we don't skip download if no system chromium
+    sudo sed -i '/^PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=/d' "${ENV_FILE}" || true
   fi
 
   # Remove any accidentally downloaded x64 Chrome cache to avoid confusion
