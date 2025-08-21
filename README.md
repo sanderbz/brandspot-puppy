@@ -13,7 +13,9 @@
 5. [Configuration](#configuration)
 6. [Project Layout](#project-layout)
 7. [Environment Variables](#environment-variables)
-8. [Support](#support)
+8. [Deployment](#deployment)
+9. [Server Deployment Script](#server-deployment-script)
+10. [Support](#support)
 
 ---
 
@@ -190,6 +192,74 @@ brandspot-puppy/
 | ---------- | ------------- | -------------------------------------------- |
 | `PORT`     | `3000`        | HTTP listening port.                         |
 | `NODE_ENV` | `development` | Runtime mode (`development` / `production`). |
+| `HOST`     | `127.0.0.1`   | Bind address (overrides default to localhost). |
+| `HEADLESS` | `true` (prod) | Browser headless mode (`true`/`false`).      |
+
+---
+
+## Deployment
+
+The service is designed to run locally (no public exposure) and be managed via systemd. Use the `deploy.sh` script for both first and subsequent deployments.
+
+### First-time deploy (clone and configure)
+
+```bash
+./deploy.sh
+```
+
+This will:
+
+- Clone the repository into `/opt/brandspot-puppy` (default `APP_DIR`)
+- Ensure Node 20.17.0 via nvm is available (expected preinstalled)
+- Install JS dependencies (prefers pnpm via corepack; falls back to npm)
+- Write env file `/etc/brandspot/puppy.env` with:
+  - `NODE_ENV=production`
+  - `PORT=3000`
+  - `HOST=127.0.0.1`
+  - `HEADLESS=true`
+- Create systemd unit `brandspot-puppy.service`
+- Start the service and run a health check (`/health`, then a test `/crawl`)
+
+This local wrapper uploads and runs `server-deploy.sh` on the server. It is idempotent: it clones the repo if missing, ensures Node via nvm, installs deps, builds if available, writes the systemd unit, starts, and verifies health.
+
+### Script options
+
+Configure via environment variables when calling the wrapper:
+
+```bash
+SERVER_USER_HOST=deploy@91.99.182.20 \
+APP_DIR_REMOTE=/opt/brandspot-puppy \
+REPO_URL=https://github.com/sanderbz/brandspot-puppy \
+BRANCH=main \
+PORT=3000 \
+./deploy.sh
+```
+
+### Logs
+
+Logs are written to journald. Follow them with:
+
+```bash
+sudo journalctl -u brandspot-puppy -f
+```
+
+Service runs as `deploy`, binds to `127.0.0.1:${PORT}`, and exposes `POST /crawl` for Laravel at `http://localhost:3000/crawl`.
+
+---
+
+## Server Deployment Script
+
+`server-deploy.sh` is the script executed on the server by the local wrapper. It:
+
+- Clones the repo into `/opt/brandspot-puppy` if missing
+- Installs required system packages (Chromium/libs, curl, jq)
+- Ensures Node 20.17.0 via nvm for the `deploy` user
+- Installs JS dependencies (pnpm preferred; falls back to npm)
+- Runs `build` if present
+- Detects entrypoint (`dist/server.js` or `server.js`) and writes a systemd unit with absolute `ExecStart`
+- Starts/restarts the service and verifies health (`/health` then a test `/crawl`)
+
+It is safe to run repeatedly and will only do what’s needed.
 
 ---
 
