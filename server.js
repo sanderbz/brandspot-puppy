@@ -74,7 +74,7 @@ fastify.get('/health', async (request, reply) => {
     status: 'ok',
     timestamp: new Date().toISOString(),
     browser: {
-      initialized: stats.isInitialized,
+      initialized: !!stats.isInitialized,
       requestCount: stats.requestCount,
       ageMinutes: stats.ageMinutes,
       maxRequests: stats.maxRequests,
@@ -87,6 +87,37 @@ fastify.get('/health', async (request, reply) => {
       conversionTimeout: config.markdown.conversionTimeout
     }
   };
+});
+
+// Minimal synchronous test endpoint to validate browser and parsing pipeline
+fastify.get('/test-crawl', async (request, reply) => {
+  const testUrl = 'https://ip.sidn.nl/';
+  let page;
+  try {
+    const browser = await getBrowser();
+    page = await createPage(browser);
+    await page.goto(testUrl, { waitUntil: config.page.waitUntil });
+
+    const title = await page.title();
+    let ip = '';
+    try {
+      ip = await page.$eval('h1', el => (el.textContent || '').replace(/\s+/g, ' ').trim());
+    } catch (_) {
+      ip = '';
+    }
+
+    return reply.send({
+      ok: true,
+      url: testUrl,
+      title: title || '',
+      ip
+    });
+  } catch (err) {
+    logError(err, 'test-crawl');
+    return reply.code(500).send({ ok: false, error: err.message });
+  } finally {
+    try { if (page) await page.close(); } catch (_) {}
+  }
 });
 
 // Background crawling function

@@ -278,15 +278,58 @@ health_check() {
   fail "Health check failed"
 }
 
+sample_page_check() {
+  log "Fetching sample page via /test-crawl (expect title=SIDN and IP present)"
+  require_cmd curl
+  local resp
+  resp=$(curl -fsS "http://127.0.0.1:${PORT}/test-crawl" || true)
+  if [[ -z "$resp" ]]; then
+    fail "Empty response from /test-crawl"
+  fi
+  if command -v jq >/dev/null 2>&1; then
+    local ok title ip
+    ok=$(printf '%s' "$resp" | jq -r '.ok // false')
+    title=$(printf '%s' "$resp" | jq -r '.title // ""')
+    ip=$(printf '%s' "$resp" | jq -r '.ip // ""')
+    if [[ "$ok" != "true" || "$title" != "SIDN" || -z "$ip" ]]; then
+      log "Response:"; printf '%s\n' "$resp"
+      fail "/test-crawl validation failed (ok=true, title=SIDN, ip non-empty required)"
+    fi
+    log "Sample title: ${title}"
+    log "Sample IP: ${ip}"
+  else
+    echo "$resp" | grep -q '"ok"[[:space:]]*:[[:space:]]*true' || fail "/test-crawl not ok"
+    echo "$resp" | grep -q '"title"[[:space:]]*:[[:space:]]*"SIDN"' || fail "/test-crawl wrong title"
+    echo "$resp" | grep -q '"ip"[[:space:]]*:[[:space:]]*"[^"]\+"' || fail "/test-crawl missing IP"
+    log "Sample response: $resp"
+  fi
+}
+
 check_port_free_or_stop() {
   stop_existing_service
   if command -v ss >/dev/null 2>&1; then
     if ss -ltn | awk '{print $4}' | grep -q ":${PORT}$"; then
-      fail "Port ${PORT} is in use. Please free it before deploying."
+      if [[ "${FORCE_KILL_PORT:-0}" == "1" ]]; then
+        log "Port ${PORT} is in use; FORCE_KILL_PORT=1 set, attempting to free it"
+        if command -v fuser >/dev/null 2>&1; then
+          sudo fuser -k "${PORT}/tcp" || true
+        elif command -v lsof >/dev/null 2>&1; then
+          lsof -ti tcp:"${PORT}" | xargs -r -n1 sudo kill -9 || true
+        fi
+        sleep 1
+      else
+        fail "Port ${PORT} is in use. Please free it before deploying. Set FORCE_KILL_PORT=1 to kill holder."
+      fi
     fi
   elif command -v lsof >/dev/null 2>&1; then
     if lsof -i ":${PORT}" -sTCP:LISTEN >/dev/null 2>&1; then
-      fail "Port ${PORT} is in use. Please free it before deploying."
+      if [[ "${FORCE_KILL_PORT:-0}" == "1" ]]; then
+        log "Port ${PORT} is in use; FORCE_KILL_PORT=1 set, attempting to free it"
+        lsof -ti tcp:"${PORT}" | xargs -r -n1 sudo kill -9 || true
+        sleep 1
+      else
+        fail "Port ${PORT} is in use. Please free it before deploying. Set FORCE_KILL_PORT=1 to kill holder."
+      fi
     fi
   fi
 }
@@ -311,6 +354,7 @@ main() {
     fail "Port ${PORT} did not open"
   fi
   health_check
+  sample_page_check
   log "Deployment complete. Follow logs with: sudo journalctl -u ${SERVICE_NAME} -f"
 }
 
