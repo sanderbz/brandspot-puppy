@@ -3,7 +3,7 @@ export const config = {
   // Server settings
   server: {
     port: process.env.PORT || 3000,
-    host: process.env.HOST || '0.0.0.0' // Bind to all interfaces (IPv4 + IPv6 compatible)
+    host: process.env.HOST || '0.0.0.0'
   },
 
   // Browser management settings
