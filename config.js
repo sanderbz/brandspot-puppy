@@ -30,7 +30,18 @@ export const config = {
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage', // Overcome limited resource problems
         '--disable-accelerated-2d-canvas',
-        '--disable-gpu'
+        '--disable-gpu',
+        '--disable-background-timer-throttling', // Prevent background throttling
+        '--disable-backgrounding-occluded-windows',
+        '--disable-renderer-backgrounding',
+        '--disable-features=TranslateUI',
+        '--disable-default-apps',
+        '--disable-sync',
+        '--metrics-recording-only',
+        '--no-first-run',
+        '--safebrowsing-disable-auto-update',
+        '--disable-component-update',
+        '--disable-domain-reliability'
       ]
     }
   },

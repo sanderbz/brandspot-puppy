@@ -83,6 +83,21 @@ ensure_paths_and_dirs() {
   sudo mkdir -p "${ENV_DIR}"
 }
 
+update_repo() {
+  if [[ -d "${APP_DIR}/.git" ]]; then
+    log "Updating repository to ${BRANCH}"
+    sudo -u "${DEPLOY_USER}" bash -lc "\
+      set -Eeuo pipefail; \
+      cd '${APP_DIR}'; \
+      git remote set-url origin '${REPO_URL}' || true; \
+      git fetch --prune origin; \
+      git reset --hard "origin/${BRANCH}"; \
+      git clean -fdx || true" || fail "Failed to update repository"
+  else
+    log "Not a git repo; skipping update"
+  fi
+}
+
 ensure_node_runtime() {
   if [[ -s "${NVM_DIR}/nvm.sh" ]] && \
      sudo -u "${DEPLOY_USER}" bash -lc "source '${NVM_DIR}/nvm.sh'; nvm ls 20.17.0 >/dev/null 2>&1"; then
@@ -136,38 +151,51 @@ NODE_ENV=production
 PORT=${PORT}
 HOST=127.0.0.1
 HEADLESS=true
+# Temporary debug logging for deployment validation
+DEBUG_DEPLOY=${DEBUG_DEPLOY:-false}
 EOF
   sudo chmod 0644 "${ENV_FILE}"
 }
 
 ensure_chromium_and_env() {
-  # Try to ensure a system chromium is present and set executable path for puppeteer
-  local exe=""
-  if command -v apt-get >/dev/null 2>&1; then
-    log "Installing system Chromium for ARM64"
-    sudo apt-get update -y || true
-    sudo apt-get install -y chromium || sudo apt-get install -y chromium-browser || true
-  fi
-
-  if command -v chromium >/dev/null 2>&1; then exe="$(command -v chromium)"; fi
-  if [[ -z "${exe}" ]] && command -v chromium-browser >/dev/null 2>&1; then exe="$(command -v chromium-browser)"; fi
-
-  if [[ -n "${exe}" ]]; then
-    log "Configuring PUPPETEER_EXECUTABLE_PATH=${exe}"
-    # Remove any previous line and append
-    sudo sed -i '/^PUPPETEER_EXECUTABLE_PATH=/d' "${ENV_FILE}" || true
-    echo "PUPPETEER_EXECUTABLE_PATH=${exe}" | sudo tee -a "${ENV_FILE}" >/dev/null
-    # Skip bundled download when using system chromium
-    sudo sed -i '/^PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=/d' "${ENV_FILE}" || true
-    echo "PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true" | sudo tee -a "${ENV_FILE}" >/dev/null
+  # Standard ARM64 solution: use system Chromium (Chrome has no official ARM64 Linux builds)
+  log "Configuring system Chromium for ARM64 compatibility"
+  
+  # Clean Puppeteer cache (x86_64 Chrome won't work on ARM64)
+  log "Cleaning incompatible Puppeteer Chrome cache"
+  sudo -u "${DEPLOY_USER}" rm -rf "/home/${DEPLOY_USER}/.cache/puppeteer" || true
+  
+  # Install system Chromium for ARM64
+  log "Installing system Chromium (ARM64 compatible)"
+  sudo apt-get update -y || true
+  sudo apt-get install -y chromium-browser || sudo apt-get install -y chromium || true
+  
+  # Find system chromium path
+  local chromium_path=""
+  if command -v chromium-browser >/dev/null 2>&1; then
+    chromium_path="$(command -v chromium-browser)"
+  elif command -v chromium >/dev/null 2>&1; then
+    chromium_path="$(command -v chromium)"
   else
-    log "System chromium not found; allowing puppeteer download"
-    # Ensure we don't skip download if no system chromium
-    sudo sed -i '/^PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=/d' "${ENV_FILE}" || true
+    fail "Failed to install system Chromium"
   fi
-
-  # Remove any accidentally downloaded x64 Chrome cache to avoid confusion
-  sudo -u "${DEPLOY_USER}" rm -rf "/home/${DEPLOY_USER}/.cache/puppeteer/chrome" || true
+  
+  # Verify system chromium works on ARM64
+  log "Testing system Chromium: ${chromium_path}"
+  if sudo -u "${DEPLOY_USER}" "${chromium_path}" --version >/dev/null 2>&1; then
+    log "System Chromium verification: PASSED"
+  else
+    fail "System Chromium verification: FAILED"
+  fi
+  
+  # Configure Puppeteer to use system Chromium (standard ARM64 solution)
+  sudo sed -i '/^PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=/d' "${ENV_FILE}" || true
+  echo "PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true" | sudo tee -a "${ENV_FILE}" >/dev/null
+  
+  sudo sed -i '/^PUPPETEER_EXECUTABLE_PATH=/d' "${ENV_FILE}" || true  
+  echo "PUPPETEER_EXECUTABLE_PATH=${chromium_path}" | sudo tee -a "${ENV_FILE}" >/dev/null
+  
+  log "Configured Puppeteer to use system Chromium (ARM64 compatible)"
 }
 
 write_systemd_unit() {
@@ -187,10 +215,13 @@ Restart=always
 RestartSec=2
 KillSignal=SIGTERM
 TimeoutStopSec=3
-NoNewPrivileges=true
-ProtectSystem=full
+# Chrome-friendly systemd settings
+ProtectSystem=false
 ProtectHome=false
-PrivateTmp=true
+PrivateTmp=false
+MemoryDenyWriteExecute=false
+RestrictRealtime=false
+SystemCallFilter=
 
 [Install]
 WantedBy=multi-user.target
@@ -198,18 +229,30 @@ EOF
 }
 
 stop_existing_service() {
-  if systemctl list-unit-files | grep -q "^${SERVICE_NAME}"; then
-    log "Stopping existing service (if running)"
-    sudo systemctl stop "${SERVICE_NAME}" || true
-  fi
+  log "Stopping existing service (if running)"
+  sudo systemctl stop "${SERVICE_NAME}" || true
+  # Wait up to 10s for port to be freed
+  for i in {1..10}; do
+    if command -v ss >/dev/null 2>&1; then
+      if ! ss -ltn | awk '{print $4}' | grep -q ":${PORT}$"; then return 0; fi
+    elif command -v lsof >/dev/null 2>&1; then
+      if ! lsof -i ":${PORT}" -sTCP:LISTEN >/dev/null 2>&1; then return 0; fi
+    else
+      return 0
+    fi
+    sleep 1
+  done
+  log "Port ${PORT} still appears in use after stop; proceeding to check."
 }
 
 install_node_dependencies() {
-  log "Installing Node dependencies"
+  log "Installing Node dependencies (skipping Chrome download)"
+  # Skip Puppeteer Chrome download since we're using system Chromium
   sudo -u "${DEPLOY_USER}" bash -lc "\
     set -Eeuo pipefail; \
     source '${NVM_DIR}/nvm.sh'; \
     cd '${APP_DIR}'; \
+    export PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true; \
     if [[ -f package-lock.json ]]; then npm ci || npm install; else npm install; fi;"
 }
 
@@ -309,27 +352,15 @@ check_port_free_or_stop() {
   stop_existing_service
   if command -v ss >/dev/null 2>&1; then
     if ss -ltn | awk '{print $4}' | grep -q ":${PORT}$"; then
-      if [[ "${FORCE_KILL_PORT:-0}" == "1" ]]; then
-        log "Port ${PORT} is in use; FORCE_KILL_PORT=1 set, attempting to free it"
-        if command -v fuser >/dev/null 2>&1; then
-          sudo fuser -k "${PORT}/tcp" || true
-        elif command -v lsof >/dev/null 2>&1; then
-          lsof -ti tcp:"${PORT}" | xargs -r -n1 sudo kill -9 || true
-        fi
-        sleep 1
-      else
-        fail "Port ${PORT} is in use. Please free it before deploying. Set FORCE_KILL_PORT=1 to kill holder."
-      fi
+      log "Port ${PORT} is in use by another process:"
+      ss -ltnp | grep ":${PORT} " || true
+      fail "Port ${PORT} is in use. Please free it before deploying."
     fi
   elif command -v lsof >/dev/null 2>&1; then
     if lsof -i ":${PORT}" -sTCP:LISTEN >/dev/null 2>&1; then
-      if [[ "${FORCE_KILL_PORT:-0}" == "1" ]]; then
-        log "Port ${PORT} is in use; FORCE_KILL_PORT=1 set, attempting to free it"
-        lsof -ti tcp:"${PORT}" | xargs -r -n1 sudo kill -9 || true
-        sleep 1
-      else
-        fail "Port ${PORT} is in use. Please free it before deploying. Set FORCE_KILL_PORT=1 to kill holder."
-      fi
+      log "Port ${PORT} is in use by another process:"
+      lsof -nP -iTCP:"${PORT}" -sTCP:LISTEN || true
+      fail "Port ${PORT} is in use. Please free it before deploying."
     fi
   fi
 }
@@ -340,8 +371,11 @@ main() {
   install_system_packages
   ensure_node_runtime
   write_env_file
-  ensure_chromium_and_env
+  # Stop early to free the port before proceeding
+  stop_existing_service
+  update_repo
   install_node_dependencies
+  ensure_chromium_and_env
   run_build_if_available
   detect_entrypoint
   resolve_node_bin
