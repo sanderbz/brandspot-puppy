@@ -23,6 +23,9 @@ export const config = {
       return process.env.NODE_ENV === 'production';
     })(),
     
+    // Use Camoufox for enhanced stealth (requires Playwright migration)
+    asCamoufox: process.env.AS_CAMOUFOX === 'true' || false,
+    
     // Puppeteer launch options
     launchOptions: {
       args: [
@@ -79,7 +82,7 @@ export const config = {
   // Logging settings
   logging: {
     // Enable detailed debug logging
-    debug: false, // process.env.NODE_ENV !== 'production',
+    debug: true, // process.env.NODE_ENV !== 'production',
     
     // Log request details
     logRequests: true

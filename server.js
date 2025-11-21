@@ -1,8 +1,15 @@
 import Fastify from 'fastify';
 import fetch from 'node-fetch';
 import { PuppeteerBlocker } from '@ghostery/adblocker-puppeteer';
-import { getBrowser, createPage, shutdownBrowser, getBrowserStats } from './browser.js';
+// Conditional browser import based on Camoufox setting
 import { config } from './config.js';
+let browserModule;
+if (config.browser.asCamoufox) {
+  browserModule = await import('./puppeteer-browser.js');
+} else {
+  browserModule = await import('./browser.js');
+}
+const { getBrowser, createPage, shutdownBrowser, getBrowserStats } = browserModule;
 import { parseWebpage } from './parser.js';
 
 const fastify = Fastify({
@@ -82,9 +89,10 @@ fastify.get('/health', async (request, reply) => {
     },
     config: {
       debug: config.logging.debug,
-      parser: config.parser.engine,
+      parser: config.parser.engines,
       navigationTimeout: config.page.navigationTimeout,
-      conversionTimeout: config.markdown.conversionTimeout
+      conversionTimeout: config.markdown.conversionTimeout,
+      asCamoufox: config.browser.asCamoufox
     }
   };
 });
@@ -135,11 +143,15 @@ const processCrawlRequest = async (url, callback_url, test) => {
     page = await createPage(browser);
     debugLog('New page created');
 
-    // Set up Ghostery adblocker
-    debugLog('Setting up Ghostery adblocker...');
-    const blocker = await PuppeteerBlocker.fromPrebuiltAdsAndTracking(fetch);
-    await blocker.enableBlockingInPage(page);
-    debugLog('Adblocker enabled');
+    // Set up Ghostery adblocker (Puppeteer only)
+    if (!config.browser.asCamoufox) {
+      debugLog('Setting up Ghostery adblocker...');
+      const blocker = await PuppeteerBlocker.fromPrebuiltAdsAndTracking(fetch);
+      await blocker.enableBlockingInPage(page);
+      debugLog('Adblocker enabled');
+    } else {
+      debugLog('Skipping adblocker (Camoufox has built-in ad blocking)');
+    }
 
     // Navigate to URL
     debugLog('Navigating to URL...');
@@ -242,7 +254,8 @@ const start = async () => {
       browser: {
         headless: config.browser.headless,
         maxAge: config.browser.maxAge,
-        maxRequests: config.browser.maxRequests
+        maxRequests: config.browser.maxRequests,
+        asCamoufox: config.browser.asCamoufox
       },
       page: config.page,
       parser: config.parser,

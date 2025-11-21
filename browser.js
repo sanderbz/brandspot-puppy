@@ -125,6 +125,11 @@ export const createPage = async (browser) => {
   // Set navigation timeout
   page.setDefaultNavigationTimeout(config.page.navigationTimeout);
   
+  // Note: Camoufox is handled in puppeteer-browser.js
+  if (config.browser.asCamoufox) {
+    log('Note: This page uses regular Puppeteer (Camoufox handled separately)');
+  }
+  
   return page;
 };
 
