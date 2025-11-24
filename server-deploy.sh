@@ -158,44 +158,53 @@ EOF
 }
 
 ensure_chromium_and_env() {
-  # Standard ARM64 solution: use system Chromium (Chrome has no official ARM64 Linux builds)
-  log "Configuring system Chromium for ARM64 compatibility"
-  
+  # Use Playwright's Chromium - snap chromium doesn't work in systemd services
+  log "Installing Playwright Chromium for ARM64 (avoids snap systemd issues)"
+
   # Clean Puppeteer cache (x86_64 Chrome won't work on ARM64)
   log "Cleaning incompatible Puppeteer Chrome cache"
   sudo -u "${DEPLOY_USER}" rm -rf "/home/${DEPLOY_USER}/.cache/puppeteer" || true
-  
-  # Install system Chromium for ARM64
-  log "Installing system Chromium (ARM64 compatible)"
-  sudo apt-get update -y || true
-  sudo apt-get install -y chromium-browser || sudo apt-get install -y chromium || true
-  
-  # Find system chromium path
+
+  # Install Playwright chromium using npx
+  log "Downloading Playwright Chromium for ARM64"
+  sudo -u "${DEPLOY_USER}" bash -lc "\
+    set -Eeuo pipefail; \
+    source '${NVM_DIR}/nvm.sh'; \
+    cd '${APP_DIR}'; \
+    npx playwright install chromium"
+
+  # Find Playwright chromium path
   local chromium_path=""
-  if command -v chromium-browser >/dev/null 2>&1; then
-    chromium_path="$(command -v chromium-browser)"
-  elif command -v chromium >/dev/null 2>&1; then
-    chromium_path="$(command -v chromium)"
-  else
-    fail "Failed to install system Chromium"
+  local playwright_cache="${DEPLOY_HOME}/.cache/ms-playwright"
+
+  # Find the latest chromium directory
+  if [[ -d "${playwright_cache}" ]]; then
+    local chromium_dir=$(ls -d "${playwright_cache}"/chromium-* 2>/dev/null | sort -V | tail -1)
+    if [[ -n "${chromium_dir}" && -f "${chromium_dir}/chrome-linux/chrome" ]]; then
+      chromium_path="${chromium_dir}/chrome-linux/chrome"
+    fi
   fi
-  
-  # Verify system chromium works on ARM64
-  log "Testing system Chromium: ${chromium_path}"
+
+  if [[ -z "${chromium_path}" || ! -f "${chromium_path}" ]]; then
+    fail "Failed to install Playwright Chromium"
+  fi
+
+  # Verify Playwright chromium works
+  log "Testing Playwright Chromium: ${chromium_path}"
   if sudo -u "${DEPLOY_USER}" "${chromium_path}" --version >/dev/null 2>&1; then
-    log "System Chromium verification: PASSED"
+    log "Playwright Chromium verification: PASSED"
   else
-    fail "System Chromium verification: FAILED"
+    fail "Playwright Chromium verification: FAILED"
   fi
-  
-  # Configure Puppeteer to use system Chromium (standard ARM64 solution)
+
+  # Configure Puppeteer to use Playwright Chromium
   sudo sed -i '/^PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=/d' "${ENV_FILE}" || true
   echo "PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true" | sudo tee -a "${ENV_FILE}" >/dev/null
-  
-  sudo sed -i '/^PUPPETEER_EXECUTABLE_PATH=/d' "${ENV_FILE}" || true  
+
+  sudo sed -i '/^PUPPETEER_EXECUTABLE_PATH=/d' "${ENV_FILE}" || true
   echo "PUPPETEER_EXECUTABLE_PATH=${chromium_path}" | sudo tee -a "${ENV_FILE}" >/dev/null
-  
-  log "Configured Puppeteer to use system Chromium (ARM64 compatible)"
+
+  log "Configured Puppeteer to use Playwright Chromium (systemd compatible)"
 }
 
 write_systemd_unit() {
