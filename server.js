@@ -1,16 +1,11 @@
 import Fastify from 'fastify';
 import fetch from 'node-fetch';
 import { PuppeteerBlocker } from '@ghostery/adblocker-puppeteer';
-// Conditional browser import based on Camoufox setting
 import { config } from './config.js';
-let browserModule;
-if (config.browser.asCamoufox) {
-  browserModule = await import('./puppeteer-browser.js');
-} else {
-  browserModule = await import('./browser.js');
-}
-const { getBrowser, createPage, shutdownBrowser, getBrowserStats } = browserModule;
+import { getBrowser, createPage, closePage, shutdownBrowser, getBrowserStats } from './browser.js';
 import { parseWebpage } from './parser.js';
+import { askChatGPT } from './chatgpt.js';
+import { pageQueue, logQueueStatus } from './queue.js';
 
 const fastify = Fastify({
   logger: true
@@ -76,7 +71,8 @@ const logError = (error, context = '') => {
 // Health check endpoint with browser stats
 fastify.get('/health', async (request, reply) => {
   const stats = getBrowserStats();
-  
+  const queueStats = pageQueue.getStats();
+
   return {
     status: 'ok',
     timestamp: new Date().toISOString(),
@@ -87,12 +83,17 @@ fastify.get('/health', async (request, reply) => {
       maxRequests: stats.maxRequests,
       maxAgeMinutes: Math.round(stats.maxAgeMs / 1000 / 60)
     },
+    queue: {
+      running: queueStats.running,
+      queued: queueStats.queued,
+      maxConcurrent: queueStats.maxConcurrent
+    },
     config: {
       debug: config.logging.debug,
       parser: config.parser.engines,
       navigationTimeout: config.page.navigationTimeout,
       conversionTimeout: config.markdown.conversionTimeout,
-      asCamoufox: config.browser.asCamoufox
+      proxyEnabled: config.proxy?.enabled || false
     }
   };
 });
@@ -124,7 +125,7 @@ fastify.get('/test-crawl', async (request, reply) => {
     logError(err, 'test-crawl');
     return reply.code(500).send({ ok: false, error: err.message });
   } finally {
-    try { if (page) await page.close(); } catch (_) {}
+    if (page) await closePage(page);
   }
 });
 
@@ -143,15 +144,11 @@ const processCrawlRequest = async (url, callback_url, test) => {
     page = await createPage(browser);
     debugLog('New page created');
 
-    // Set up Ghostery adblocker (Puppeteer only)
-    if (!config.browser.asCamoufox) {
-      debugLog('Setting up Ghostery adblocker...');
-      const blocker = await PuppeteerBlocker.fromPrebuiltAdsAndTracking(fetch);
-      await blocker.enableBlockingInPage(page);
-      debugLog('Adblocker enabled');
-    } else {
-      debugLog('Skipping adblocker (Camoufox has built-in ad blocking)');
-    }
+    // Set up Ghostery adblocker
+    debugLog('Setting up Ghostery adblocker...');
+    const blocker = await PuppeteerBlocker.fromPrebuiltAdsAndTracking(fetch);
+    await blocker.enableBlockingInPage(page);
+    debugLog('Adblocker enabled');
 
     // Navigate to URL
     debugLog('Navigating to URL...');
@@ -200,17 +197,10 @@ const processCrawlRequest = async (url, callback_url, test) => {
   } catch (error) {
     logError(error, 'Background crawling');
   } finally {
-    // Clean up page resources (keep browser alive)
+    // Clean up page and its isolated context (keep browser alive)
     debugLog('Starting page cleanup...');
-    try {
-      if (page) {
-        debugLog('Closing page...');
-        await page.close();
-      }
-      debugLog('Page cleanup completed successfully');
-    } catch (cleanupError) {
-      logError(cleanupError, 'Page cleanup');
-    }
+    if (page) await closePage(page);
+    debugLog('Page cleanup completed successfully');
   }
 };
 
@@ -239,6 +229,75 @@ fastify.post('/crawl', async (request, reply) => {
   return reply.status(202).send({ message: 'Request accepted and processed' });
 });
 
+// POST /chatgpt endpoint - Ask ChatGPT a question with multiple iterations (parallel)
+fastify.post('/chatgpt', async (request, reply) => {
+  const { question, iterations = 1 } = request.body;
+
+  // Input validation
+  if (!question || typeof question !== 'string') {
+    return reply.status(400).send({ error: 'question is required and must be a string' });
+  }
+
+  if (question.trim().length === 0) {
+    return reply.status(400).send({ error: 'question cannot be empty' });
+  }
+
+  const iterCount = Math.min(Math.max(parseInt(iterations, 10) || 1, 1), 100); // Clamp 1-100
+
+  requestLog(`ChatGPT request received: "${question.substring(0, 50)}..." (${iterCount} iterations, parallel)`);
+  logQueueStatus();
+
+  // Run single iteration - queue handles concurrency limiting
+  const runIteration = async (iterNum) => {
+    let page;
+    try {
+      await pageQueue.acquire();
+
+      const browser = await getBrowser();
+      page = await createPage(browser); // Creates isolated context
+
+      requestLog(`Starting iteration ${iterNum}/${iterCount}...`);
+      const result = await askChatGPT(page, question);
+
+      requestLog(`Iteration ${iterNum}/${iterCount} completed (${result.response.length} chars)`);
+
+      return {
+        iteration: iterNum,
+        response: result.response,
+        web_searched: result.web_searched,
+        citations: result.citations,
+        extracted_at: result.extracted_at
+      };
+
+    } catch (error) {
+      logError(error, `ChatGPT iteration ${iterNum}`);
+      return {
+        iteration: iterNum,
+        error: error.message,
+        extracted_at: new Date().toISOString()
+      };
+    } finally {
+      if (page) await closePage(page);
+      pageQueue.release();
+    }
+  };
+
+  // Launch all iterations in parallel - queue limits to maxConcurrentPages
+  const iterationPromises = Array.from({ length: iterCount }, (_, i) => runIteration(i + 1));
+  const results = await Promise.all(iterationPromises);
+
+  // Sort by iteration number (parallel execution may complete out of order)
+  results.sort((a, b) => a.iteration - b.iteration);
+
+  logQueueStatus();
+  requestLog(`ChatGPT request completed: ${results.filter(r => !r.error).length}/${iterCount} successful`);
+
+  return reply.send({
+    question,
+    results
+  });
+});
+
 // Start server
 const start = async () => {
   try {
@@ -254,14 +313,18 @@ const start = async () => {
       browser: {
         headless: config.browser.headless,
         maxAge: config.browser.maxAge,
-        maxRequests: config.browser.maxRequests,
-        asCamoufox: config.browser.asCamoufox
+        maxRequests: config.browser.maxRequests
       },
       page: config.page,
       parser: config.parser,
       markdown: {
         conversionTimeout: config.markdown.conversionTimeout
       },
+      proxy: {
+        enabled: config.proxy?.enabled || false,
+        server: config.proxy?.enabled ? config.proxy.server : undefined
+      },
+      chatgpt: config.chatgpt,
       logging: config.logging
     }, null, 2));
     

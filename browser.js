@@ -1,5 +1,6 @@
 import puppeteer from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
+import proxyChain from 'proxy-chain';
 import { config } from './config.js';
 import { initializeExtensions } from './extension-manager.js';
 
@@ -11,6 +12,7 @@ let globalBrowser = null;
 let browserLaunchTime = null;
 let requestCount = 0;
 let browserInitPromise = null;
+let anonymizedProxyUrl = null; // Local proxy URL from proxy-chain
 
 // Helper function for logging
 const log = (message) => {
@@ -46,12 +48,39 @@ const initBrowser = async () => {
     ...config.browser.launchOptions.args,
     ...extensionArgs
   ];
-  
+
+  // Set up proxy using proxy-chain for authenticated proxies
+  if (config.proxy?.enabled && config.proxy.server) {
+    // Close any existing anonymized proxy
+    if (anonymizedProxyUrl) {
+      try {
+        await proxyChain.closeAnonymizedProxy(anonymizedProxyUrl, true);
+      } catch (e) {
+        log(`Warning: Failed to close old proxy: ${e.message}`);
+      }
+    }
+
+    // Build the upstream proxy URL with auth
+    const proxyUrl = config.proxy.username && config.proxy.password
+      ? `http://${config.proxy.username}:${config.proxy.password}@${config.proxy.server}`
+      : `http://${config.proxy.server}`;
+
+    // Create anonymized local proxy (handles auth internally)
+    anonymizedProxyUrl = await proxyChain.anonymizeProxy(proxyUrl);
+    allArgs.push(`--proxy-server=${anonymizedProxyUrl}`);
+    log(`Proxy enabled via proxy-chain: ${config.proxy.server} -> ${anonymizedProxyUrl}`);
+  }
+
   const launchOptions = {
     ...config.browser.launchOptions,
     headless: config.browser.headless,
+    devtools: config.browser.devtools,
     args: allArgs
   };
+
+  if (config.browser.devtools) {
+    log('DevTools will open automatically for debugging');
+  }
   
   log(`Browser mode: ${config.browser.headless ? 'headless' : 'visible (non-headless)'}`);
   if (extensionArgs.length > 0) {
@@ -120,20 +149,99 @@ export const getBrowserStats = () => {
 
 // Create a new page with common setup
 export const createPage = async (browser) => {
-  const page = await browser.newPage();
-  
+  // Always use incognito context for isolated cookies/session
+  // Proxy auth is handled by proxy-chain at browser level, so incognito works fine
+  const context = await browser.createBrowserContext();
+  const page = await context.newPage();
+  page._isolatedContext = context;
+  log('Created isolated browser context for request');
+
   // Set navigation timeout
   page.setDefaultNavigationTimeout(config.page.navigationTimeout);
-  
-  // Note: Camoufox is handled in puppeteer-browser.js
-  if (config.browser.asCamoufox) {
-    log('Note: This page uses regular Puppeteer (Camoufox handled separately)');
-  }
-  
+
   return page;
 };
 
-// Graceful shutdown (browser only)
+// Close page and its isolated context
+export const closePage = async (page) => {
+  try {
+    if (page._isolatedContext) {
+      await page._isolatedContext.close();
+      log('Closed isolated browser context');
+    } else {
+      await page.close();
+    }
+  } catch (error) {
+    log(`Error closing page: ${error.message}`);
+  }
+};
+
+// Generate a unique session ID for proxy rotation
+const generateSessionId = () => {
+  return `${Date.now()}-${Math.random().toString(36).substring(2, 10)}`;
+};
+
+// Create a fresh browser with a new proxy session (for IP rotation)
+// This is used for requests that need a fresh IP each time (like ChatGPT)
+export const createFreshBrowserWithProxy = async () => {
+  log('Creating fresh browser with new proxy session...');
+
+  const allArgs = [...config.browser.launchOptions.args];
+  let sessionProxyUrl = null;
+
+  if (config.proxy?.enabled && config.proxy.server) {
+    const sessionId = generateSessionId();
+
+    // Add session ID to username for IP rotation (SmartProxy format)
+    // e.g., user-spnz0omji9-country-nl -> user-spnz0omji9-country-nl-session-abc123
+    const sessionUsername = `${config.proxy.username}-session-${sessionId}`;
+
+    const proxyUrl = `http://${sessionUsername}:${config.proxy.password}@${config.proxy.server}`;
+
+    // Create anonymized local proxy for this session
+    sessionProxyUrl = await proxyChain.anonymizeProxy(proxyUrl);
+    allArgs.push(`--proxy-server=${sessionProxyUrl}`);
+    log(`Fresh proxy session created: ${sessionId} -> ${sessionProxyUrl}`);
+  }
+
+  const launchOptions = {
+    ...config.browser.launchOptions,
+    headless: config.browser.headless,
+    args: allArgs
+  };
+
+  const browser = await puppeteer.launch(launchOptions);
+
+  // Store proxy URL on browser for cleanup
+  browser._sessionProxyUrl = sessionProxyUrl;
+
+  log('Fresh browser launched successfully');
+  return browser;
+};
+
+// Close a fresh browser and its proxy session
+export const closeFreshBrowser = async (browser) => {
+  if (!browser) return;
+
+  try {
+    await browser.close();
+    log('Fresh browser closed');
+  } catch (error) {
+    log(`Error closing fresh browser: ${error.message}`);
+  }
+
+  // Close the session-specific proxy
+  if (browser._sessionProxyUrl) {
+    try {
+      await proxyChain.closeAnonymizedProxy(browser._sessionProxyUrl, true);
+      log('Session proxy closed');
+    } catch (error) {
+      log(`Error closing session proxy: ${error.message}`);
+    }
+  }
+};
+
+// Graceful shutdown (browser and proxy-chain)
 export const shutdownBrowser = async () => {
   log('Shutting down browser gracefully...');
   if (globalBrowser) {
@@ -144,6 +252,17 @@ export const shutdownBrowser = async () => {
       log(`Error closing browser: ${error.message}`);
     }
     globalBrowser = null;
+  }
+
+  // Close the anonymized proxy from proxy-chain
+  if (anonymizedProxyUrl) {
+    try {
+      await proxyChain.closeAnonymizedProxy(anonymizedProxyUrl, true);
+      log('Anonymized proxy closed successfully');
+    } catch (error) {
+      log(`Error closing anonymized proxy: ${error.message}`);
+    }
+    anonymizedProxyUrl = null;
   }
 };
 

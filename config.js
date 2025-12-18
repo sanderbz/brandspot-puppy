@@ -22,10 +22,13 @@ export const config = {
       }
       return process.env.NODE_ENV === 'production';
     })(),
-    
-    // Use Camoufox for enhanced stealth (requires Playwright migration)
-    asCamoufox: process.env.AS_CAMOUFOX === 'true' || false,
-    
+
+    // Open DevTools automatically (for debugging selectors, network, etc.)
+    devtools: process.env.DEVTOOLS === 'true' || false,
+
+    // Max concurrent pages (tabs) to prevent overload
+    maxConcurrentPages: parseInt(process.env.MAX_CONCURRENT_PAGES, 10) || 5,
+
     // Puppeteer launch options
     launchOptions: {
       args: [
@@ -83,8 +86,28 @@ export const config = {
   logging: {
     // Enable detailed debug logging
     debug: true, // process.env.NODE_ENV !== 'production',
-    
+
     // Log request details
     logRequests: true
+  },
+
+  // Proxy settings (optional - set enabled: true to use)
+  proxy: {
+    enabled: process.env.PROXY_ENABLED === 'true' || false,
+    server: process.env.PROXY_SERVER || 'dc.smartproxy.com:10000',
+    username: process.env.PROXY_USERNAME || '',
+    password: process.env.PROXY_PASSWORD || ''
+  },
+
+  // ChatGPT crawler settings
+  chatgpt: {
+    // Base URL for ChatGPT
+    baseUrl: 'https://chatgpt.com',
+
+    // Timeout for waiting for response (ms)
+    responseTimeout: 120000,
+
+    // Polling interval to check if response is complete (ms)
+    pollInterval: 500
   }
 }; 
