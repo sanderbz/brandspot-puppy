@@ -357,8 +357,6 @@ export function getExtensionArgs(extensionPaths) {
   return [
     `--disable-extensions-except=${pathsString}`,
     `--load-extension=${pathsString}`,
-    '--disable-web-security', // Sometimes needed for extension content scripts
-    '--allow-running-insecure-content' // Sometimes needed for extension functionality
   ];
 }
 

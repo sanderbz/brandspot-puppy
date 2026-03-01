@@ -236,7 +236,41 @@ fastify.post('/crawl', async (request, reply) => {
 
   // Immediately respond to client
   requestLog('Responding immediately to client');
-  return reply.status(202).send({ message: 'Request accepted and processed' });
+  return reply.status(202).send({ message: 'Request accepted, processing in background' });
+});
+
+// POST /crawl-sync endpoint — synchronous version that returns the result directly
+fastify.post('/crawl-sync', async (request, reply) => {
+  const { url } = request.body;
+
+  if (!url || typeof url !== 'string') {
+    return reply.status(400).send({ error: 'url is required and must be a string' });
+  }
+
+  requestLog(`Sync crawl request received for: ${url}`);
+  let page;
+
+  try {
+    const browser = await getBrowser();
+    page = await createPage(browser);
+
+    if (!config.browser.asCamoufox) {
+      const blocker = await PuppeteerBlocker.fromPrebuiltAdsAndTracking(fetch);
+      await blocker.enableBlockingInPage(page);
+    }
+
+    await page.goto(url, { waitUntil: config.page.waitUntil });
+    const html = await page.content();
+    const result = await parseWebpage(html, url);
+
+    requestLog(`Sync crawl complete: "${result.title}" (${result.markdown.length} chars)`);
+    return reply.send(result);
+  } catch (error) {
+    logError(error, 'Sync crawl');
+    return reply.status(500).send({ error: error.message });
+  } finally {
+    try { if (page) await page.close(); } catch (_) {}
+  }
 });
 
 // Start server
