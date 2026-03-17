@@ -193,6 +193,71 @@ const stripAttributes = (document) => {
   });
 };
 
+// Extract SEO-critical data from the DOM before cleaning strips it
+const extractSeoData = (document) => {
+  const seo = {};
+
+  // JSON-LD structured data
+  const jsonLdScripts = document.querySelectorAll('script[type="application/ld+json"]');
+  if (jsonLdScripts.length > 0) {
+    seo.jsonLd = [];
+    jsonLdScripts.forEach(script => {
+      try {
+        seo.jsonLd.push(JSON.parse(script.textContent));
+      } catch (_) {
+        // Malformed JSON-LD, skip
+      }
+    });
+    if (seo.jsonLd.length === 0) delete seo.jsonLd;
+  }
+
+  // Canonical URL
+  const canonical = document.querySelector('link[rel="canonical"]');
+  if (canonical) seo.canonical = canonical.getAttribute('href') || '';
+
+  // Meta description
+  const metaDesc = document.querySelector('meta[name="description"]');
+  if (metaDesc) seo.metaDescription = metaDesc.getAttribute('content') || '';
+
+  // Meta robots
+  const metaRobots = document.querySelector('meta[name="robots"]');
+  if (metaRobots) seo.metaRobots = metaRobots.getAttribute('content') || '';
+
+  // Open Graph tags
+  const ogTags = document.querySelectorAll('meta[property^="og:"]');
+  if (ogTags.length > 0) {
+    seo.openGraph = {};
+    ogTags.forEach(tag => {
+      const prop = tag.getAttribute('property').replace('og:', '');
+      seo.openGraph[prop] = tag.getAttribute('content') || '';
+    });
+  }
+
+  // Twitter Card tags
+  const twitterTags = document.querySelectorAll('meta[name^="twitter:"]');
+  if (twitterTags.length > 0) {
+    seo.twitterCard = {};
+    twitterTags.forEach(tag => {
+      const name = tag.getAttribute('name').replace('twitter:', '');
+      seo.twitterCard[name] = tag.getAttribute('content') || '';
+    });
+  }
+
+  // Alternate / hreflang links
+  const hreflangLinks = document.querySelectorAll('link[rel="alternate"][hreflang]');
+  if (hreflangLinks.length > 0) {
+    seo.hreflang = [];
+    hreflangLinks.forEach(link => {
+      seo.hreflang.push({
+        lang: link.getAttribute('hreflang'),
+        href: link.getAttribute('href') || ''
+      });
+    });
+  }
+
+  return seo;
+};
+
 // Clean the DOM for full-page extraction (remove junk, keep structure)
 const cleanDomForFullPage = (document) => {
   // Step 1: Remove non-content tags entirely
@@ -320,6 +385,9 @@ const describeInteractiveElements = (document) => {
 const parseFullPage = async (document) => {
   requestLog('Using full-page extraction mode');
 
+  // Extract SEO data BEFORE cleaning strips it from the DOM
+  const seo = extractSeoData(document);
+
   // Clean the DOM (remove scripts, ads, tracking, hidden elements)
   cleanDomForFullPage(document);
 
@@ -349,7 +417,8 @@ const parseFullPage = async (document) => {
     title,
     byline: '',
     content: html,
-    markdown: normalizedMarkdown
+    markdown: normalizedMarkdown,
+    seo
   };
 };
 
@@ -387,7 +456,7 @@ export const parseWebpage = async (html, url, mode = 'article') => {
   }
 
   // Build final result object
-  return {
+  const output = {
     url: url,
     mode: mode,
     title: result.title || '',
@@ -395,4 +464,11 @@ export const parseWebpage = async (html, url, mode = 'article') => {
     markdown: result.markdown,
     extracted_at: new Date().toISOString()
   };
+
+  // Include SEO data when available (full-page mode)
+  if (result.seo && Object.keys(result.seo).length > 0) {
+    output.seo = result.seo;
+  }
+
+  return output;
 }; 
