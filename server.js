@@ -128,8 +128,15 @@ fastify.get('/test-crawl', async (request, reply) => {
   }
 });
 
+// Validate and normalize extraction mode
+const validateMode = (mode) => {
+  if (!mode) return config.parser.defaultMode;
+  if (mode === 'article' || mode === 'full') return mode;
+  return null; // invalid
+};
+
 // Background crawling function
-const processCrawlRequest = async (url, callback_url, test) => {
+const processCrawlRequest = async (url, callback_url, test, mode = 'article') => {
   let page;
 
   try {
@@ -164,8 +171,8 @@ const processCrawlRequest = async (url, callback_url, test) => {
     debugLog(`HTML content retrieved (${html.length} chars)`);
 
     // Parse webpage using the parser module
-    debugLog('Processing webpage with parser module...');
-    const result = await parseWebpage(html, url);
+    debugLog(`Processing webpage with parser module (mode: ${mode})...`);
+    const result = await parseWebpage(html, url, mode);
     debugLog('Webpage parsing completed');
 
     // Handle test mode vs callback
@@ -216,7 +223,7 @@ const processCrawlRequest = async (url, callback_url, test) => {
 
 // POST /crawl endpoint
 fastify.post('/crawl', async (request, reply) => {
-  const { url, callback_url, test = false } = request.body;
+  const { url, callback_url, test = false, mode } = request.body;
 
   // Input validation
   if (!url || typeof url !== 'string') {
@@ -227,10 +234,15 @@ fastify.post('/crawl', async (request, reply) => {
     return reply.status(400).send({ error: 'callback_url is required when test is false' });
   }
 
-  requestLog(`Crawl request received for: ${url} (test: ${test})`);
+  const validatedMode = validateMode(mode);
+  if (validatedMode === null) {
+    return reply.status(400).send({ error: 'mode must be "article" or "full"' });
+  }
+
+  requestLog(`Crawl request received for: ${url} (test: ${test}, mode: ${validatedMode})`);
 
   // Start background processing (fire-and-forget)
-  processCrawlRequest(url, callback_url, test).catch(error => {
+  processCrawlRequest(url, callback_url, test, validatedMode).catch(error => {
     logError(error, 'Background processing');
   });
 
@@ -241,13 +253,18 @@ fastify.post('/crawl', async (request, reply) => {
 
 // POST /crawl-sync endpoint — synchronous version that returns the result directly
 fastify.post('/crawl-sync', async (request, reply) => {
-  const { url } = request.body;
+  const { url, mode } = request.body;
 
   if (!url || typeof url !== 'string') {
     return reply.status(400).send({ error: 'url is required and must be a string' });
   }
 
-  requestLog(`Sync crawl request received for: ${url}`);
+  const validatedMode = validateMode(mode);
+  if (validatedMode === null) {
+    return reply.status(400).send({ error: 'mode must be "article" or "full"' });
+  }
+
+  requestLog(`Sync crawl request received for: ${url} (mode: ${validatedMode})`);
   let page;
 
   try {
@@ -261,7 +278,7 @@ fastify.post('/crawl-sync', async (request, reply) => {
 
     await page.goto(url, { waitUntil: config.page.waitUntil });
     const html = await page.content();
-    const result = await parseWebpage(html, url);
+    const result = await parseWebpage(html, url, validatedMode);
 
     requestLog(`Sync crawl complete: "${result.title}" (${result.markdown.length} chars)`);
     return reply.send(result);

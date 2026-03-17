@@ -61,9 +61,12 @@ export const config = {
   // Content parsing settings
   parser: {
     // Which parsers to use: array of 'readability' and/or 'defuddle'
-    engines: ['defuddle', 'readability']
+    engines: ['defuddle', 'readability'],
     // engines: ['readability']
     // engines: ['defuddle', 'readability']
+
+    // Default extraction mode: 'article' (Readability/Defuddle) or 'full' (entire page)
+    defaultMode: process.env.PARSER_MODE || 'article'
   },
 
   // Markdown conversion settings

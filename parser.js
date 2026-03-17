@@ -161,8 +161,200 @@ const parseArticle = async (document) => {
   };
 };
 
+// Strip all HTML attributes except semantically meaningful ones (href, src, alt)
+// This is the single biggest token-reduction step — following Crawl4AI's approach
+const stripAttributes = (document) => {
+  const keepAttrs = {
+    'a': ['href'],
+    'img': ['src', 'alt'],
+    'input': ['id', 'type', 'name', 'placeholder', 'value', 'aria-label', 'required'],
+    'textarea': ['id', 'name', 'placeholder', 'aria-label', 'required'],
+    'select': ['id', 'name', 'aria-label', 'required'],
+    'option': ['value', 'selected'],
+    'label': ['for'],
+    'form': ['action', 'method'],
+    'button': ['type'],
+    'td': ['colspan', 'rowspan'],
+    'th': ['colspan', 'rowspan', 'scope'],
+    'time': ['datetime'],
+    'details': ['open'],
+    'summary': []
+  };
+
+  document.querySelectorAll('*').forEach(el => {
+    const tag = el.tagName.toLowerCase();
+    const allowed = keepAttrs[tag] || [];
+    const attrs = Array.from(el.attributes);
+    for (const attr of attrs) {
+      if (!allowed.includes(attr.name)) {
+        el.removeAttribute(attr.name);
+      }
+    }
+  });
+};
+
+// Clean the DOM for full-page extraction (remove junk, keep structure)
+const cleanDomForFullPage = (document) => {
+  // Step 1: Remove non-content tags entirely
+  const removeTags = ['script', 'style', 'noscript', 'iframe', 'object', 'embed', 'applet', 'link', 'meta'];
+  for (const tag of removeTags) {
+    document.querySelectorAll(tag).forEach(el => el.remove());
+  }
+
+  // Step 2: Remove hidden elements (display:none, aria-hidden="true", hidden attribute)
+  document.querySelectorAll('[aria-hidden="true"], [hidden]').forEach(el => el.remove());
+  document.querySelectorAll('[style]').forEach(el => {
+    const style = el.getAttribute('style') || '';
+    if (/display\s*:\s*none/i.test(style) || /visibility\s*:\s*hidden/i.test(style)) {
+      el.remove();
+    }
+  });
+
+  // Step 3: Remove ALL SVGs (decorative noise for LLMs — icons add no semantic value)
+  document.querySelectorAll('svg').forEach(svg => svg.remove());
+
+  // Step 4: Remove tracking pixels (1x1 or 0x0 images)
+  document.querySelectorAll('img').forEach(img => {
+    const width = img.getAttribute('width');
+    const height = img.getAttribute('height');
+    if ((width === '1' && height === '1') || (width === '0' && height === '0')) {
+      img.remove();
+    }
+  });
+
+  // Step 5: Remove boilerplate containers by class/id patterns
+  // Based on Firecrawl's removal list + common patterns across tools
+  const boilerplatePatterns = [
+    // Ads
+    '[class*="ad-container"]', '[class*="ad-wrapper"]', '[class*="ad-slot"]', '[class*="ad-banner"]',
+    '[id*="google_ads"]', '[id*="doubleclick"]',
+    '[data-ad]', '[data-ad-slot]', '[data-google-query-id]',
+    // Tracking & analytics
+    '[class*="tracking"]', '[class*="analytics"]',
+    // Cookie/consent banners
+    '[class*="cookie"]', '[class*="consent"]', '[id*="cookie"]', '[id*="consent"]',
+    '[class*="gdpr"]', '[id*="gdpr"]',
+    // Social sharing
+    '[class*="social-share"]', '[class*="share-button"]', '[class*="sharing"]',
+    // Newsletter signups (but NOT regular forms)
+    '[class*="newsletter"]', '[id*="newsletter"]',
+    // Comment sections
+    '[class*="comments"]', '[id*="comments"]', '[id*="disqus"]',
+    // Sidebar widgets (often ads/related)
+    '[class*="sidebar"]', '[id*="sidebar"]',
+  ];
+  for (const selector of boilerplatePatterns) {
+    try {
+      document.querySelectorAll(selector).forEach(el => el.remove());
+    } catch (_) {
+      // Invalid selector in jsdom, skip
+    }
+  }
+
+  // Step 6: Strip all non-semantic HTML attributes (biggest token reduction)
+  stripAttributes(document);
+
+  // Step 7: Remove empty containers (keep structural/interactive elements)
+  const preserveTags = new Set([
+    'img', 'input', 'textarea', 'select', 'br', 'hr',
+    'th', 'td', 'tr', 'table', 'form', 'button',
+    'video', 'audio', 'source', 'canvas'
+  ]);
+  document.querySelectorAll('div, span, p, section, aside').forEach(el => {
+    if (!preserveTags.has(el.tagName.toLowerCase()) &&
+        !el.textContent.trim() &&
+        !el.querySelector('img, input, textarea, select, button, video, audio')) {
+      el.remove();
+    }
+  });
+
+  return document;
+};
+
+// Enhance interactive elements with descriptive text before markdown conversion
+const describeInteractiveElements = (document) => {
+  // Annotate form inputs with their labels/placeholders
+  document.querySelectorAll('input, textarea, select').forEach(el => {
+    const type = el.getAttribute('type') || 'text';
+    const placeholder = el.getAttribute('placeholder') || '';
+    const label = el.getAttribute('aria-label') || '';
+
+    // Find associated label element
+    const id = el.getAttribute('id');
+    let labelText = label;
+    if (!labelText && id) {
+      const labelEl = document.querySelector(`label[for="${id}"]`);
+      if (labelEl) labelText = labelEl.textContent.trim();
+    }
+
+    if (el.tagName.toLowerCase() === 'select') {
+      const options = Array.from(el.querySelectorAll('option'))
+        .map(o => o.textContent.trim())
+        .filter(Boolean)
+        .slice(0, 10); // Limit options shown
+      const desc = `[Dropdown${labelText ? ': ' + labelText : ''}${options.length ? ' — Options: ' + options.join(', ') : ''}]`;
+      el.insertAdjacentHTML('afterend', `<span>${desc}</span>`);
+    } else if (el.tagName.toLowerCase() === 'textarea') {
+      const desc = `[Text area${labelText ? ': ' + labelText : ''}${placeholder ? ' — "' + placeholder + '"' : ''}]`;
+      el.insertAdjacentHTML('afterend', `<span>${desc}</span>`);
+    } else if (['checkbox', 'radio'].includes(type)) {
+      // These are usually fine with their label, skip
+    } else {
+      const desc = `[Input${type !== 'text' ? ' (' + type + ')' : ''}${labelText ? ': ' + labelText : ''}${placeholder ? ' — "' + placeholder + '"' : ''}]`;
+      el.insertAdjacentHTML('afterend', `<span>${desc}</span>`);
+    }
+  });
+
+  // Annotate details/summary (toggles)
+  document.querySelectorAll('details').forEach(el => {
+    const summary = el.querySelector('summary');
+    if (summary && !summary.textContent.includes('[Toggle]')) {
+      summary.insertAdjacentHTML('afterbegin', '[Toggle] ');
+    }
+  });
+
+  return document;
+};
+
+// Parse full page content — keeps navigation, CTAs, forms, pricing, etc.
+const parseFullPage = async (document) => {
+  requestLog('Using full-page extraction mode');
+
+  // Clean the DOM (remove scripts, ads, tracking, hidden elements)
+  cleanDomForFullPage(document);
+
+  // Describe interactive elements before conversion
+  describeInteractiveElements(document);
+
+  // Get the cleaned body HTML
+  const body = document.body;
+  if (!body) {
+    throw new Error('No body element found in document');
+  }
+
+  const html = body.innerHTML;
+
+  // Convert to markdown using existing converter
+  const markdown = await convertToMarkdown(html);
+  const normalizedMarkdown = normalizeLineBreaks(markdown);
+
+  // Extract title from document
+  const title = document.title ||
+    (document.querySelector('h1') ? document.querySelector('h1').textContent.trim() : '') ||
+    '';
+
+  requestLog(`Full-page extraction complete: "${title}" (${normalizedMarkdown.length} chars)`);
+
+  return {
+    title,
+    byline: '',
+    content: html,
+    markdown: normalizedMarkdown
+  };
+};
+
 // Main parsing function that handles the entire pipeline
-export const parseWebpage = async (html, url) => {
+export const parseWebpage = async (html, url, mode = 'article') => {
   requestLog('Starting webpage parsing pipeline');
   
   // Parse HTML with jsdom
@@ -171,27 +363,36 @@ export const parseWebpage = async (html, url) => {
   const document = dom.window.document;
   debugLog('DOM created');
 
-  // Inject header into DOM before Readability processing
-  debugLog('Injecting header into DOM...');
-  const headerResult = injectHeader(document);
-  debugLog(`Header injection completed - found: ${headerResult.headerFound ? `yes (${headerResult.headerTag})` : 'no'}`);
+  let result;
 
-  // Extract article content with configured parsers (now includes header)
-  requestLog(`Extracting article with ${config.parser.engines.join(', ')}...`);
-  const article = await parseArticle(document);
-  requestLog(`${config.parser.engines.join(', ')} extraction completed`);
+  if (mode === 'full') {
+    // Full-page mode: keep all structural content
+    result = await parseFullPage(document);
+  } else {
+    // Article mode (default): use Readability/Defuddle article extraction
+    // Inject header into DOM before Readability processing
+    debugLog('Injecting header into DOM...');
+    const headerResult = injectHeader(document);
+    debugLog(`Header injection completed - found: ${headerResult.headerFound ? `yes (${headerResult.headerTag})` : 'no'}`);
 
-  if (!article) {
-    throw new Error('Failed to extract article content');
+    // Extract article content with configured parsers (now includes header)
+    requestLog(`Extracting article with ${config.parser.engines.join(', ')}...`);
+    result = await parseArticle(document);
+    requestLog(`${config.parser.engines.join(', ')} extraction completed`);
+
+    if (!result) {
+      throw new Error('Failed to extract article content');
+    }
+    requestLog(`Article extracted: "${result.title}"`);
   }
-  requestLog(`Article extracted: "${article.title}"`);
 
   // Build final result object
   return {
     url: url,
-    title: article.title || '',
-    byline: article.byline || '',
-    markdown: article.markdown,
+    mode: mode,
+    title: result.title || '',
+    byline: result.byline || '',
+    markdown: result.markdown,
     extracted_at: new Date().toISOString()
   };
 }; 
